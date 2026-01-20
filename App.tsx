@@ -27,6 +27,7 @@ const App: React.FC = () => {
   }, [voiceEnabled]);
 
   const handleStartClick = () => {
+    // Button always leads to auth first if not logged in
     if (!isLoggedIn) {
       setView('auth');
     } else {
