@@ -105,6 +105,27 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // Auto-login logic for browser session
+        if (!isLoggedIn) {
+           const isAdminUser = user.email === 'admin@priyo.com';
+           const savedName = localStorage.getItem('priyo_user_name') || user.displayName || '';
+           
+           setUserProfile(prev => ({ 
+             ...prev, 
+             id: user.uid, 
+             name: savedName || prev.name, 
+             avatar: user.photoURL || prev.avatar, 
+             isAdmin: isAdminUser 
+           }));
+           
+           setIsLoggedIn(true);
+           // Don't show modal on auto-login if name exists
+           if (!savedName) {
+             setTempNameInput(user.displayName || '');
+             setShowNameModal(true);
+           }
+        }
+
         setIsLoadingCloud(true);
         // Load cloud profiles only when user is authenticated
         const cloudProfiles = await cloudStore.loadProfiles();

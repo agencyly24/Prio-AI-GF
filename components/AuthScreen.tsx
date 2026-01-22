@@ -24,7 +24,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onBack, 
       if (user.displayName) localStorage.setItem('priyo_user_name', user.displayName);
 
       onLoginSuccess({
-        name: user.displayName || '', // Name will be handled by the popup in App.tsx if empty
+        name: user.displayName || '', // Name handled in App.tsx popup
         email: user.email || '',
         avatar: user.photoURL || '',
         uid: user.uid
