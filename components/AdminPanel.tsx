@@ -132,7 +132,44 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         setPaymentRequests(updatedRequests);
         await cloudStore.savePaymentRequests(updatedRequests);
 
-        // 4. Handle Referral Commission (If any) - (Remains Local State only for now)
+        // 4. Optionally update the *currently logged-in user's profile state* if they are the one being approved
+        if (userProfile.id === req.userId) {
+            const { data: updatedUserData, error: userFetchError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', req.userId)
+                .single();
+            if (updatedUserData && !userFetchError) {
+                // Construct UserProfile from updatedUserData (similar to AuthScreen login success)
+                const updatedUserProfile: UserProfile = {
+                    id: updatedUserData.id,
+                    name: updatedUserData.name || userProfile.name,
+                    email: updatedUserData.email || userProfile.email,
+                    avatar: updatedUserData.avatar || userProfile.avatar,
+                    bio: updatedUserData.bio || userProfile.bio,
+                    level: updatedUserData.level || userProfile.level,
+                    xp: updatedUserData.xp || userProfile.xp,
+                    joinedDate: updatedUserData.created_at ? new Date(updatedUserData.created_at).toLocaleDateString() : userProfile.joinedDate,
+                    tier: updatedUserData.tier || userProfile.tier,
+                    isPremium: updatedUserData.is_premium || userProfile.isPremium,
+                    isVIP: updatedUserData.is_vip || userProfile.isVIP,
+                    isAdmin: updatedUserData.is_admin || userProfile.isAdmin,
+                    credits: updatedUserData.credits || userProfile.credits,
+                    unlockedContentIds: updatedUserData.unlocked_content_ids || userProfile.unlockedContentIds,
+                    subscriptionExpiry: updatedUserData.subscription_expiry,
+                    stats: {
+                        messagesSent: updatedUserData.messages_sent || userProfile.stats.messagesSent,
+                        hoursChatted: updatedUserData.hours_chatted || userProfile.stats.hoursChatted,
+                        companionsMet: updatedUserData.companions_met || userProfile.stats.companionsMet
+                    }
+                };
+                setUserProfile(updatedUserProfile);
+            } else {
+                console.error("Failed to re-fetch updated user data for current user:", userFetchError);
+            }
+        }
+
+        // 5. Handle Referral Commission (If any) - (Remains Local State only for now)
         if (req.referralId) {
           const referral = referrals.find(r => r.id === req.referralId);
           if (referral) {
@@ -145,7 +182,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               timestamp: new Date().toLocaleString(),
               note: `Comm. from ${req.userName} (${req.amount}Tk)`
             };
-            setReferralTransactions(prev => [newTx, ...prev]);
+            const updatedTxs = [newTx, ...referralTransactions];
+            setReferralTransactions(updatedTxs);
+            await cloudStore.saveReferralTransactions(updatedTxs); // Save to cloud
           }
         }
 
@@ -273,9 +312,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  const handleCreateReferral = (e: React.FormEvent) => {
+  const handleCreateReferral = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!refForm.name || !refForm.couponCode) return;
+    if (!refForm.name || !refForm.couponCode) return alert('Name & Coupon Code required');
     const newReferral: ReferralProfile = {
       id: 'ref_' + Math.random().toString(36).substr(2, 9),
       name: refForm.name,
@@ -285,13 +324,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       status: 'active',
       paymentInfo: refForm.paymentInfo
     };
-    setReferrals([...referrals, newReferral]);
+    const updatedReferrals = [...referrals, newReferral];
+    setReferrals(updatedReferrals);
+    await cloudStore.saveReferrals(updatedReferrals); // Save to cloud
     setRefForm({ name: '', couponCode: '', commissionRate: '20', discountAmount: '100', paymentInfo: '' });
+    alert('✅ Referral Profile Created!');
   };
 
-  const handlePayoutCommission = (txId: string) => {
+  const handlePayoutCommission = async (txId: string) => {
     if(confirm("Confirm payout sent to influencer?")) {
-      setReferralTransactions(prev => prev.map(t => t.id === txId ? { ...t, status: 'paid' } : t));
+      const updatedTxs = referralTransactions.map(t => t.id === txId ? { ...t, status: 'paid' } : t);
+      setReferralTransactions(updatedTxs);
+      await cloudStore.saveReferralTransactions(updatedTxs); // Save to cloud
+      alert('✅ Commission marked as paid!');
     }
   };
 
@@ -318,6 +363,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               {[
                 { id: 'dashboard', label: 'Dashboard', icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z' },
                 { id: 'finance', label: 'Finance', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1' },
+                { id: 'influencers', label: 'Influencers', icon: 'M17 20h2a2 2 0 002-2V7.429a2 2 0 00-.634-1.464L18.428 3.536A2 2 0 0017 3H7a2 2 0 00-1.464.634L3.536 5.999A2 2 0 003 7.429V18a2 2 0 002 2h2m0 0V9a2 2 0 012-2h4a2 2 0 012 2v11m-8-7a2 2 0 11-4 0 2 2 0 014 0z' },
                 { id: 'models', label: 'Models', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
               ].map((item) => (
                 <button key={item.id} onClick={() => setActiveTab(item.id as any)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all ${activeTab === item.id ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
@@ -344,6 +390,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                    <div className="glass p-6 rounded-[2rem] border-white/5 bg-black/20">
                       <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-2">Models</p>
                       <h3 className="text-3xl font-black text-blue-500">{profiles.length}</h3>
+                   </div>
+                </div>
+                {/* Additional dashboard stats for influencers */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                   <div className="glass p-6 rounded-[2rem] border-white/5 bg-black/20">
+                      <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-2">Total Commissions</p>
+                      <h3 className="text-3xl font-black text-blue-400">৳{stats.totalCommissions}</h3>
+                   </div>
+                   <div className="glass p-6 rounded-[2rem] border-white/5 bg-black/20">
+                      <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-2">Paid Commissions</p>
+                      <h3 className="text-3xl font-black text-green-500">৳{stats.paidCommissions}</h3>
+                   </div>
+                   <div className="glass p-6 rounded-[2rem] border-white/5 bg-black/20">
+                      <p className="text-gray-400 text-xs font-black uppercase tracking-widest mb-2">Pending Commissions</p>
+                      <h3 className="text-3xl font-black text-orange-500">৳{stats.pendingCommissions}</h3>
                    </div>
                 </div>
              </div>
@@ -374,6 +435,105 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                      </div>
                   </div>
                 ))}
+             </div>
+           )}
+
+           {activeTab === 'influencers' && (
+             <div className="space-y-8 animate-in fade-in">
+                <h2 className="text-3xl font-black mb-6">Influencer Management</h2>
+
+                {/* Create New Referral Profile */}
+                <div className="glass p-8 rounded-[3rem] border border-white/10 bg-black/40">
+                    <h3 className="text-2xl font-black mb-6">Create New Referral</h3>
+                    <form onSubmit={handleCreateReferral} className="space-y-6">
+                        <input 
+                            type="text" 
+                            placeholder="Influencer Name" 
+                            value={refForm.name} 
+                            onChange={e => setRefForm({...refForm, name: e.target.value})} 
+                            className="w-full bg-black/20 p-4 rounded-2xl border border-white/5 focus:border-blue-500/50 outline-none" 
+                            required 
+                        />
+                        <input 
+                            type="text" 
+                            placeholder="Coupon Code (e.g., RIYA99)" 
+                            value={refForm.couponCode} 
+                            onChange={e => setRefForm({...refForm, couponCode: e.target.value})} 
+                            className="w-full bg-black/20 p-4 rounded-2xl border border-white/5 focus:border-blue-500/50 outline-none uppercase" 
+                            required 
+                        />
+                        <div className="grid grid-cols-2 gap-6">
+                           <input 
+                                type="number" 
+                                placeholder="Commission Rate (%)" 
+                                value={refForm.commissionRate} 
+                                onChange={e => setRefForm({...refForm, commissionRate: e.target.value})} 
+                                className="w-full bg-black/20 p-4 rounded-2xl border border-white/5 focus:border-blue-500/50 outline-none" 
+                                required 
+                            />
+                            <input 
+                                type="number" 
+                                placeholder="Discount Amount (Tk)" 
+                                value={refForm.discountAmount} 
+                                onChange={e => setRefForm({...refForm, discountAmount: e.target.value})} 
+                                className="w-full bg-black/20 p-4 rounded-2xl border border-white/5 focus:border-blue-500/50 outline-none" 
+                                required 
+                            />
+                        </div>
+                        <input 
+                            type="text" 
+                            placeholder="Payment Info (e.g., Bkash 01XXXXXXXXX)" 
+                            value={refForm.paymentInfo} 
+                            onChange={e => setRefForm({...refForm, paymentInfo: e.target.value})} 
+                            className="w-full bg-black/20 p-4 rounded-2xl border border-white/5 focus:border-blue-500/50 outline-none" 
+                        />
+                        <button type="submit" className="w-full py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black uppercase tracking-widest text-white shadow-xl shadow-blue-600/30 transition-all">Create Referral</button>
+                    </form>
+                </div>
+
+                {/* Existing Referral Profiles */}
+                <div className="space-y-6">
+                    <h3 className="text-2xl font-black mb-4">Existing Referrals ({referrals.length})</h3>
+                    {referrals.length === 0 ? (
+                        <div className="glass p-6 rounded-3xl text-center text-gray-500 border border-white/5 bg-black/20">No referral profiles found.</div>
+                    ) : (
+                        referrals.map(ref => (
+                            <div key={ref.id} className="glass p-6 rounded-3xl border border-white/5 bg-black/20 flex justify-between items-center">
+                                <div>
+                                    <h4 className="font-bold text-lg">{ref.name} <span className="text-blue-400 font-mono text-sm">({ref.couponCode})</span></h4>
+                                    <p className="text-sm text-gray-400">Comm: {ref.commissionRate}% | Discount: ৳{ref.discountAmount}</p>
+                                    <p className="text-xs text-gray-500">Payment: {ref.paymentInfo || 'N/A'}</p>
+                                </div>
+                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${ref.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>{ref.status}</span>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                {/* Referral Transactions */}
+                <div className="space-y-6">
+                    <h3 className="text-2xl font-black mb-4">Referral Transactions ({referralTransactions.length})</h3>
+                    {referralTransactions.length === 0 ? (
+                        <div className="glass p-6 rounded-3xl text-center text-gray-500 border border-white/5 bg-black/20">No referral transactions yet.</div>
+                    ) : (
+                        referralTransactions.map(tx => (
+                            <div key={tx.id} className="glass p-6 rounded-3xl border border-white/5 bg-black/20 flex justify-between items-center">
+                                <div>
+                                    <h4 className="font-bold text-lg">৳{tx.amount} <span className="text-gray-400 font-normal">for {referrals.find(r => r.id === tx.referralId)?.name || 'Unknown'}</span></h4>
+                                    <p className="text-sm text-gray-400">{tx.note}</p>
+                                    <p className="text-xs text-gray-500 mt-1">{tx.timestamp}</p>
+                                </div>
+                                <div className="flex gap-3 items-center">
+                                {tx.status === 'pending' ? (
+                                    <button onClick={() => handlePayoutCommission(tx.id)} className="bg-orange-500 hover:bg-orange-600 px-6 py-3 rounded-xl text-black font-bold shadow-lg">Payout</button>
+                                ) : (
+                                    <span className={`px-4 py-2 rounded-xl font-bold text-sm uppercase tracking-widest ${tx.status === 'paid' ? 'text-green-500' : 'text-red-500'}`}>{tx.status}</span>
+                                )}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
              </div>
            )}
 

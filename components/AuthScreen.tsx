@@ -1,16 +1,15 @@
 
-
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase'; // Import supabase
 import { UserProfile } from '../types';
 
 interface AuthScreenProps {
-  onLoginSuccess: (user: UserProfile) => void;
+  // onLoginSuccess: (user: UserProfile) => void; // Removed this prop
   onBack: () => void;
   onAdminClick: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onBack, onAdminClick }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack, onAdminClick }) => { // Removed onLoginSuccess from destructuring
   const [isRegistering, setIsRegistering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -31,95 +30,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onBack, 
         if (!name) throw new Error("দয়া করে আপনার নাম লিখুন।");
         
         // 1. Supabase Signup
-        const { data: authData, error: authError } = await supabase.auth.signUp({
+        const { error: authError } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            data: {
+              name: name, // Pass name to user_metadata
+              is_admin: email === 'admin@priyo.com' // Pass admin status to user_metadata
+            }
+          }
         });
 
         if (authError) throw authError;
+        
+        // No direct `onLoginSuccess` call here. Supabase listener in App.tsx will pick it up.
+        // For fresh signup, ensure profile entry exists. The `onAuthStateChange` listener in App.tsx has fallback logic.
+        // It's better to just navigate back and let App.tsx handle the full profile load
+        onBack();
 
-        if (authData.user) {
-          // 2. Save user data to 'profiles' table immediately after successful signup
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert([
-              { 
-                id: authData.user.id, 
-                email: email, 
-                name: name,
-                is_active: false, // Default active status as requested
-                credits: 5, // Default credits
-                tier: 'Free',
-                is_premium: false,
-                is_vip: false,
-                is_admin: email === 'admin@priyo.com' // Set admin status based on email
-              }
-            ]);
-
-          if (profileError) {
-             console.error("Profile creation error:", profileError);
-             // Alert user but continue as auth succeeded
-             alert("অ্যাকাউন্ট তৈরি হয়েছে কিন্তু প্রোফাইল ডেটা সেভ করতে সমস্যা হয়েছে: " + profileError.message);
-          }
-
-          // Construct a UserProfile object to pass to onLoginSuccess
-          const userProfile: UserProfile = {
-              id: authData.user.id,
-              name: name,
-              email: authData.user.email || '', // Add email property
-              avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + name,
-              bio: 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
-              level: 1, xp: 0, joinedDate: new Date().toLocaleDateString(),
-              tier: 'Free', isPremium: false, isVIP: false, isAdmin: (email === 'admin@priyo.com'),
-              credits: 5, unlockedContentIds: [],
-              stats: { messagesSent: 0, hoursChatted: 0, companionsMet: 0 }
-          };
-          
-          onLoginSuccess(userProfile);
-        }
       } else {
         // Supabase Sign In
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) throw error;
         
-        if (data.user) {
-          // Fetch user details from profiles table
-          const { data: profileData, error: profileFetchError } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', data.user.id)
-            .single();
-            
-          if (profileFetchError) {
-             console.error("Profile fetch error during login:", profileFetchError);
-             alert("লগইন সফল কিন্তু প্রোফাইল লোড করতে সমস্যা: " + profileFetchError.message);
-          }
-          
-          const userProfile: UserProfile = {
-              id: data.user.id,
-              name: profileData?.name || '', // Use fetched name
-              email: data.user.email || '', // Add email property
-              avatar: profileData?.avatar || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + (profileData?.name || 'User'),
-              bio: profileData?.bio || 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
-              level: profileData?.level || 1, 
-              xp: profileData?.xp || 0, 
-              joinedDate: profileData?.created_at ? new Date(profileData.created_at).toLocaleDateString() : new Date().toLocaleDateString(),
-              tier: profileData?.tier || 'Free',
-              isPremium: profileData?.is_premium || false,
-              isVIP: profileData?.is_vip || false,
-              isAdmin: profileData?.is_admin || false,
-              credits: profileData?.credits || 0,
-              unlockedContentIds: profileData?.unlocked_content_ids || [],
-              subscriptionExpiry: profileData?.subscription_expiry,
-              stats: { messagesSent: profileData?.messages_sent || 0, hoursChatted: profileData?.hours_chatted || 0, companionsMet: profileData?.companions_met || 0 }
-          };
-
-          onLoginSuccess(userProfile);
-        }
+        // No direct `onLoginSuccess` call here. Supabase listener in App.tsx will pick it up.
+        onBack();
       }
     } catch (err: any) {
       console.error("Auth Error:", err);

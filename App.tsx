@@ -18,6 +18,7 @@ import { supabase } from './services/supabase'; // Import supabase
 const DEFAULT_USER: UserProfile = {
   id: 'guest',
   name: '',
+  email: '', // Ensure email is initialized as an empty string
   avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
   bio: 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
   level: 1, xp: 0, joinedDate: new Date().toLocaleDateString(),
@@ -107,40 +108,39 @@ const App: React.FC = () => {
             .eq('id', session.user.id)
             .single();
 
+          let currentUser: UserProfile;
+
           if (profileData && !error) {
-             setUserProfile(prev => ({ 
-               ...prev, 
+             currentUser = { 
                id: session.user.id, 
-               name: profileData.name || prev.name,
-               // Add email property here
-               email: session.user.email,
-               avatar: profileData.avatar || prev.avatar,
-               bio: profileData.bio || prev.bio,
-               level: profileData.level || prev.level,
-               xp: profileData.xp || prev.xp,
-               joinedDate: profileData.created_at ? new Date(profileData.created_at).toLocaleDateString() : prev.joinedDate,
+               name: profileData.name || session.user.user_metadata?.name || '',
+               email: session.user.email || '',
+               avatar: profileData.avatar || session.user.user_metadata?.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + (profileData.name || 'User'),
+               bio: profileData.bio || 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
+               level: profileData.level || 1, 
+               xp: profileData.xp || 0, 
+               joinedDate: profileData.created_at ? new Date(profileData.created_at).toLocaleDateString() : new Date().toLocaleDateString(),
                tier: profileData.tier || 'Free',
                isPremium: profileData.is_premium || false,
                isVIP: profileData.is_vip || false,
-               isAdmin: profileData.is_admin || false,
+               isAdmin: profileData.is_admin || isAdminUser,
                credits: profileData.credits || 0,
                unlockedContentIds: profileData.unlocked_content_ids || [],
                subscriptionExpiry: profileData.subscription_expiry,
                stats: {
-                 messagesSent: profileData.messages_sent || prev.stats.messagesSent,
-                 hoursChatted: profileData.hours_chatted || prev.stats.hoursChatted,
-                 companionsMet: profileData.companions_met || prev.stats.companionsMet
+                 messagesSent: profileData.messages_sent || 0,
+                 hoursChatted: profileData.hours_chatted || 0,
+                 companionsMet: profileData.companions_met || 0
                }
-             }));
-             // Update local storage name if present
+             };
              if (profileData.name) localStorage.setItem('priyo_user_name', profileData.name);
           } else if (error && error.code === 'PGRST116') { // No rows found
             console.log("No profile found for this user, creating default.");
             // Create a default profile if not exists (should be handled on signup, but as fallback)
-            const newProfile: UserProfile = {
+            currentUser = {
               id: session.user.id,
               name: session.user.user_metadata?.name || '',
-              email: session.user.email || '', // Add email property here
+              email: session.user.email || '',
               avatar: session.user.user_metadata?.avatar_url || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + (session.user.user_metadata?.name || 'User'),
               bio: 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
               level: 1, xp: 0, joinedDate: new Date().toLocaleDateString(),
@@ -148,14 +148,35 @@ const App: React.FC = () => {
               credits: 5, unlockedContentIds: [],
               stats: { messagesSent: 0, hoursChatted: 0, companionsMet: 0 }
             };
-            const { error: insertError } = await supabase.from('profiles').insert([newProfile]);
+            const { error: insertError } = await supabase.from('profiles').insert([currentUser]);
             if (insertError) console.error("Fallback profile insert error:", insertError);
-            setUserProfile(newProfile);
           } else if (error) {
             console.error("Error fetching user profile:", error);
+            currentUser = DEFAULT_USER; // Fallback to default user
+          } else {
+            currentUser = DEFAULT_USER; // Fallback in case of unexpected path
           }
+          
+          setUserProfile(currentUser);
+          setIsLoggedIn(true);
+
+          // Determine navigation after user profile is fully loaded
+          if (currentUser.isAdmin) {
+            setView('profile-selection'); // Admin goes directly to selection view
+          } else if (!currentUser.name) {
+             setShowNameModal(true);
+             setView('profile-selection'); // Show name modal over profile selection
+          } else if (!hasConfirmedAge) {
+             setView('age-verification');
+          } else {
+             setView('profile-selection');
+          }
+
         } catch(e) {
-          console.error("Unexpected error during profile fetch:", e);
+          console.error("Unexpected error during profile fetch or navigation:", e);
+          setIsLoggedIn(false);
+          setUserProfile(DEFAULT_USER);
+          setView('landing');
         }
 
         // 2. Load Cloud Data (Profiles & Payment Requests from Supabase app_data)
@@ -169,10 +190,15 @@ const App: React.FC = () => {
            setPaymentRequests(cloudRequests);
         }
 
-        setIsLoggedIn(true);
-        // Only redirect from landing if already logged in and view is landing
-        if (view === 'landing') {
-          setView('profile-selection');
+        // 3. Load Referral Data
+        const cloudReferrals = await cloudStore.loadReferrals();
+        if (cloudReferrals) {
+          setReferrals(cloudReferrals);
+        }
+
+        const cloudReferralTransactions = await cloudStore.loadReferralTransactions();
+        if (cloudReferralTransactions) {
+          setReferralTransactions(cloudReferralTransactions);
         }
 
       } else { // No user session
@@ -183,8 +209,10 @@ const App: React.FC = () => {
       setIsLoadingCloud(false);
     });
 
+    // Dependency array: `hasConfirmedAge` is valid because it affects navigation logic.
+    // `view` is removed to prevent unnecessary re-subscriptions and potential navigation loops.
     return () => subscription.unsubscribe();
-  }, [view]); // Rerun if view changes to potentially redirect
+  }, [hasConfirmedAge]); 
 
   // Local Storage Sync Effects
   useEffect(() => localStorage.setItem('priyo_user_profile', JSON.stringify(userProfile)), [userProfile]);
@@ -201,34 +229,106 @@ const App: React.FC = () => {
     if (selectedProfile) localStorage.setItem('priyo_selected_profile_id', selectedProfile.id);
   }, [selectedProfile]);
 
-  const handleStartClick = () => {
-    if (!isLoggedIn) setView('auth');
-    else if (!hasConfirmedAge) setView('age-verification');
-    else setView('profile-selection');
-  };
 
-  const handleLoginSuccess = (user: UserProfile) => {
-    // This is handled by onAuthStateChange largely, but we keep immediate state update for UI responsiveness
-    setUserProfile(user);
-    setIsLoggedIn(true);
-    
-    // Admin user should go to profile-selection (then can click admin panel)
-    // Non-admin user should go to name modal if name not set, then age verification or profile selection
-    if (user.isAdmin) {
-      setView('profile-selection');
+  // Poll for User Updates (for general app syncing when admin panel is used by another admin, or data changes elsewhere)
+  useEffect(() => {
+    if (!isLoggedIn || !userProfile.id) return;
+    const interval = setInterval(async () => {
+        if (!supabase) return;
+        
+        const { data: freshProfileData, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userProfile.id)
+            .single();
+
+        if (freshProfileData && !error) {
+            // Check if essential profile data has changed
+            const isDifferent = 
+                freshProfileData.credits !== userProfile.credits || 
+                freshProfileData.tier !== userProfile.tier ||
+                freshProfileData.is_premium !== userProfile.isPremium ||
+                freshProfileData.is_vip !== userProfile.isVIP ||
+                freshProfileData.subscription_expiry !== userProfile.subscriptionExpiry ||
+                freshProfileData.name !== userProfile.name; // Also check name
+            
+            if (isDifferent) {
+                const updatedUser: UserProfile = {
+                    id: freshProfileData.id,
+                    name: freshProfileData.name,
+                    email: freshProfileData.email || '',
+                    avatar: freshProfileData.avatar,
+                    bio: freshProfileData.bio,
+                    level: freshProfileData.level,
+                    xp: freshProfileData.xp,
+                    joinedDate: freshProfileData.created_at ? new Date(freshProfileData.created_at).toLocaleDateString() : userProfile.joinedDate,
+                    tier: freshProfileData.tier,
+                    isPremium: freshProfileData.is_premium,
+                    isVIP: freshProfileData.is_vip,
+                    isAdmin: freshProfileData.is_admin,
+                    credits: freshProfileData.credits,
+                    unlockedContentIds: freshProfileData.unlocked_content_ids,
+                    subscriptionExpiry: freshProfileData.subscription_expiry,
+                    stats: {
+                        messagesSent: freshProfileData.messages_sent,
+                        hoursChatted: freshProfileData.hours_chatted,
+                        companionsMet: freshProfileData.companions_met
+                    }
+                };
+                setUserProfile(updatedUser);
+            }
+        } else if (error) {
+            console.error("Polling user data error:", error);
+        }
+
+        // Also Refresh Admin Data if Admin (Payment Requests, Referrals, Referral Transactions)
+        if (userProfile.isAdmin) {
+            const reqs = await cloudStore.loadPaymentRequests();
+            if (reqs) setPaymentRequests(reqs);
+
+            const refs = await cloudStore.loadReferrals();
+            if (refs) setReferrals(refs);
+
+            const refTxs = await cloudStore.loadReferralTransactions();
+            if (refTxs) setReferralTransactions(refTxs);
+        }
+    }, 2000); // Check every 2s
+    return () => clearInterval(interval);
+}, [isLoggedIn, userProfile.id, userProfile.credits, userProfile.tier, userProfile.isPremium, userProfile.isVIP, userProfile.subscriptionExpiry, userProfile.name, userProfile.isAdmin]);
+
+
+  const handleStartClick = () => {
+    if (!isLoggedIn) {
+      setView('auth');
     } else {
-      if (!user.name) {
-         setShowNameModal(true);
-      } else {
-         setView(hasConfirmedAge ? 'profile-selection' : 'age-verification');
+      // Logic handled by onAuthStateChange listener after login
+      // If already logged in, the listener should have set the view correctly
+      // We can just ensure we're not on 'landing'
+      if (view === 'landing') {
+        if (!userProfile.name) {
+          setShowNameModal(true);
+          setView('profile-selection');
+        } else if (!hasConfirmedAge) {
+          setView('age-verification');
+        } else {
+          setView('profile-selection');
+        }
       }
     }
   };
 
+  // Removed handleLoginSuccess as AuthScreen no longer uses it
+  // and onAuthStateChange is the source of truth for user state and navigation.
+
   const handleNameSubmit = async () => {
     if (!supabase) return;
 
-    const finalName = tempNameInput.trim() || userProfile.name || 'Friend';
+    const finalName = tempNameInput.trim();
+    if (!finalName) {
+      alert("নাম খালি রাখা যাবে না।");
+      return;
+    }
+
     const updatedUser = { ...userProfile, name: finalName };
     setUserProfile(updatedUser);
     localStorage.setItem('priyo_user_name', finalName);
@@ -368,8 +468,8 @@ const App: React.FC = () => {
 
         {view === 'auth' && (
           <AuthScreen 
-            onLoginSuccess={handleLoginSuccess} 
-            onBack={() => setView('landing')} 
+            // onLoginSuccess is removed as per new auth flow
+            onBack={() => setView('landing')} // On back from auth, go to landing
             onAdminClick={() => setView('admin-panel')} 
           />
         )}
