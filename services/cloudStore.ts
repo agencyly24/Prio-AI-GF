@@ -1,52 +1,60 @@
-
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { supabase } from "./supabase";
 import { GirlfriendProfile } from "../types";
-import { db, auth } from "./firebase";
 
-const COLLECTION_NAME = "app_data";
-const DOC_ID = "profiles";
+// We use a generic 'app_data' table to simulate the previous Firestore logic
+// Table schema assumption: id (text, PK), data (jsonb), updated_at (timestamptz)
 
 export const cloudStore = {
-  // Save all profiles to Google Cloud
+  // Save all profiles to Supabase
   async saveProfiles(profiles: GirlfriendProfile[]) {
-    if (!db) return;
+    if (!supabase) return;
     
-    // Check if user is authenticated before trying to write
-    if (!auth.currentUser) {
+    // Check if user is authenticated
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
       console.warn("⚠️ Cloud Sync Skipped: User is not authenticated.");
       return;
     }
 
     try {
-      const docRef = doc(db, COLLECTION_NAME, DOC_ID);
-      await setDoc(docRef, { data: profiles, updatedAt: new Date().toISOString() }, { merge: true });
-      console.log("✅ Profiles synced to Google Cloud");
+      const { error } = await supabase
+        .from('app_data')
+        .upsert({ 
+          id: 'profiles', 
+          data: profiles, 
+          updated_at: new Date().toISOString() 
+        });
+
+      if (error) throw error;
+      console.log("✅ Profiles synced to Supabase");
     } catch (e: any) {
-      if (e.code === 'permission-denied') {
-        console.warn("⚠️ Cloud Save Failed: Permission denied. Check Firestore rules or user role.");
-      } else {
-        console.error("❌ Failed to save to Cloud:", e);
-      }
+      console.error("❌ Failed to save to Cloud:", e.message);
     }
   },
 
-  // Load profiles from Google Cloud
+  // Load profiles from Supabase
   async loadProfiles(): Promise<GirlfriendProfile[] | null> {
-    if (!db) return null;
+    if (!supabase) return null;
 
     try {
-      const docRef = doc(db, COLLECTION_NAME, DOC_ID);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        console.log("📥 Loaded profiles from Google Cloud");
-        return docSnap.data().data as GirlfriendProfile[];
+      const { data, error } = await supabase
+        .from('app_data')
+        .select('data')
+        .eq('id', 'profiles')
+        .single();
+
+      if (error) throw error;
+      
+      if (data && data.data) {
+        console.log("📥 Loaded profiles from Supabase");
+        return data.data as GirlfriendProfile[];
       }
     } catch (e: any) {
-      // Suppress permission errors on initial load for unauthenticated users
-      if (e.code === 'permission-denied') {
-        console.log("ℹ️ Could not load cloud profiles (Permission denied). Using local defaults.");
+      if (e.code === 'PGRST116') {
+         // No rows found, which is fine for first load
+         console.log("ℹ️ No cloud profiles found. Using local defaults.");
       } else {
-        console.error("❌ Failed to load from Cloud:", e);
+         console.error("❌ Failed to load from Cloud:", e.message);
       }
     }
     return null;

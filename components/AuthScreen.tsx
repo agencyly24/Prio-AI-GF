@@ -1,7 +1,5 @@
-
 import React, { useState } from 'react';
-import { auth } from '../services/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { supabase } from '../services/supabase';
 
 interface AuthScreenProps {
   onLoginSuccess: (user: { name: string; email?: string; avatar?: string; uid?: string }) => void;
@@ -18,7 +16,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onBack, 
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
@@ -27,37 +25,83 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onBack, 
       if (isRegistering) {
         if (!name) throw new Error("দয়া করে আপনার নাম লিখুন।");
         
-        const result = await createUserWithEmailAndPassword(auth, email, password);
-        await updateProfile(result.user, { displayName: name });
-        
-        localStorage.setItem('priyo_is_logged_in', 'true');
-        localStorage.setItem('priyo_user_name', name);
-        
-        onLoginSuccess({
-            name: name,
-            email: result.user.email || '',
-            avatar: result.user.photoURL || '',
-            uid: result.user.uid
+        // 1. Sign Up
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
         });
+
+        if (authError) throw authError;
+
+        if (authData.user) {
+          // 2. Save user data to 'profiles' table as requested
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert([
+              { 
+                id: authData.user.id, 
+                email: email, 
+                name: name,
+                created_at: new Date().toISOString()
+              }
+            ]);
+
+          if (profileError) {
+             console.error("Profile creation error:", profileError);
+             // Continue anyway as auth was successful
+          }
+
+          localStorage.setItem('priyo_is_logged_in', 'true');
+          localStorage.setItem('priyo_user_name', name);
+          
+          onLoginSuccess({
+              name: name,
+              email: authData.user.email || '',
+              avatar: '',
+              uid: authData.user.id
+          });
+        }
       } else {
-        const result = await signInWithEmailAndPassword(auth, email, password);
-        
-        localStorage.setItem('priyo_is_logged_in', 'true');
-        if (result.user.displayName) localStorage.setItem('priyo_user_name', result.user.displayName);
-        
-        onLoginSuccess({
-            name: result.user.displayName || '',
-            email: result.user.email || '',
-            avatar: result.user.photoURL || '',
-            uid: result.user.uid
+        // Sign In
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
         });
+
+        if (error) throw error;
+        
+        if (data.user) {
+          // Fetch user name from profiles table
+          let userName = '';
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('name')
+            .eq('id', data.user.id)
+            .single();
+            
+          if (profileData && profileData.name) {
+             userName = profileData.name;
+          }
+
+          localStorage.setItem('priyo_is_logged_in', 'true');
+          if (userName) localStorage.setItem('priyo_user_name', userName);
+          
+          onLoginSuccess({
+              name: userName,
+              email: data.user.email || '',
+              avatar: '',
+              uid: data.user.id
+          });
+        }
       }
     } catch (err: any) {
-      console.error("Email Auth Error:", err);
+      console.error("Auth Error:", err);
       let msg = "লগিন ব্যর্থ হয়েছে।";
-      if (err.code === 'auth/invalid-credential') msg = "ইমেইল বা পাসওয়ার্ড ভুল।";
-      else if (err.code === 'auth/email-already-in-use') msg = "এই ইমেইলটি ইতিমধ্যেই ব্যবহার করা হয়েছে।";
-      else if (err.code === 'auth/weak-password') msg = "পাসওয়ার্ডটি অন্তত ৬ অক্ষরের হতে হবে।";
+      if (err.message === 'Invalid login credentials') msg = "ইমেইল বা পাসওয়ার্ড ভুল।";
+      else if (err.message.includes('already registered')) msg = "এই ইমেইলটি ইতিমধ্যেই ব্যবহার করা হয়েছে।";
+      else if (err.message.includes('weak password')) msg = "পাসওয়ার্ডটি অন্তত ৬ অক্ষরের হতে হবে।";
+      else msg = err.message || "সমস্যা হচ্ছে, আবার চেষ্টা করুন।";
+      
       setError(msg);
       setLoading(false);
     }
@@ -80,7 +124,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onBack, 
 
         <div className="space-y-6">
           {/* Email/Password Form */}
-          <form onSubmit={handleEmailAuth} className="space-y-4">
+          <form onSubmit={handleAuth} className="space-y-4">
             {isRegistering && (
               <div className="space-y-1">
                 <input 

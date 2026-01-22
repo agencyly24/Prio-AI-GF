@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { View, GirlfriendProfile, UserProfile, PaymentRequest, Message, ReferralProfile, ReferralTransaction, PersonalityType } from './types';
 import { PROFILES as INITIAL_PROFILES, APP_CONFIG, SUBSCRIPTION_PLANS } from './constants';
@@ -10,11 +9,10 @@ import { ProfileDetail } from './components/ProfileDetail';
 import { AgeVerificationScreen } from './components/AgeVerificationScreen';
 import { UserAccount } from './components/UserAccount';
 import { SubscriptionPlans } from './components/SubscriptionPlans';
-import { CreditPurchaseModal } from './components/CreditPurchaseModal'; // New Import
+import { CreditPurchaseModal } from './components/CreditPurchaseModal';
 import { AdminPanel } from './components/AdminPanel';
 import { cloudStore } from './services/cloudStore';
-import { auth } from './services/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { supabase } from './services/supabase';
 
 const DEFAULT_USER: UserProfile = {
   id: 'user_' + Math.random().toString(36).substr(2, 9),
@@ -42,7 +40,6 @@ const DEFAULT_USER: UserProfile = {
 const PROFILE_CATEGORIES = ['All', 'Sweet', 'Romantic', 'Flirty', 'Sexy', 'Horny', 'Wife'];
 
 // Helper to prevent crash on bad JSON
-// Fixed: Added trailing comma to generic type T to support arrow function in TSX
 const safeJsonParse = <T,>(key: string, fallback: T): T => {
   try {
     const item = localStorage.getItem(key);
@@ -68,7 +65,6 @@ const App: React.FC = () => {
 
   const [selectedProfile, setSelectedProfile] = useState<GirlfriendProfile | null>(() => {
     const savedId = localStorage.getItem('priyo_selected_profile_id');
-    // We need to access the current 'profiles' state here, but in initializer we use the logic directly
     const savedProfiles = safeJsonParse('priyo_dynamic_profiles', INITIAL_PROFILES);
     return savedProfiles.find((p: GirlfriendProfile) => p.id === savedId) || null;
   });
@@ -101,33 +97,41 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(() => localStorage.getItem('priyo_voice_enabled') !== 'false');
 
-  // Firebase Auth State Listener & Cloud Load
+  // Supabase Auth Listener & Cloud Load
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Auto-login logic for browser session
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        // Auto-login logic
         if (!isLoggedIn) {
-           const isAdminUser = user.email === 'admin@priyo.com';
-           const savedName = localStorage.getItem('priyo_user_name') || user.displayName || '';
+           const isAdminUser = session.user.email === 'admin@priyo.com';
            
+           // Fetch user name from profiles table
+           let userName = localStorage.getItem('priyo_user_name') || '';
+           if (!userName) {
+              const { data: profileData } = await supabase
+                  .from('profiles')
+                  .select('name')
+                  .eq('id', session.user.id)
+                  .single();
+              if (profileData) userName = profileData.name;
+           }
+
            setUserProfile(prev => ({ 
              ...prev, 
-             id: user.uid, 
-             name: savedName || prev.name, 
-             avatar: user.photoURL || prev.avatar, 
+             id: session.user.id, 
+             name: userName || prev.name, 
              isAdmin: isAdminUser 
            }));
            
            setIsLoggedIn(true);
            // Don't show modal on auto-login if name exists
-           if (!savedName) {
-             setTempNameInput(user.displayName || '');
+           if (!userName) {
              setShowNameModal(true);
            }
         }
 
         setIsLoadingCloud(true);
-        // Load cloud profiles only when user is authenticated
+        // Load cloud profiles
         const cloudProfiles = await cloudStore.loadProfiles();
         if (cloudProfiles && cloudProfiles.length > 0) {
           setProfiles(cloudProfiles);
@@ -136,7 +140,8 @@ const App: React.FC = () => {
         setIsLoadingCloud(false);
       }
     });
-    return () => unsubscribe();
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // Cloud Sync Effect - Save on Change (ONLY IF ADMIN)
@@ -168,9 +173,8 @@ const App: React.FC = () => {
   };
 
   const handleLoginSuccess = (user: { name: string; email?: string; avatar?: string; uid?: string }) => {
-    const isAdminUser = user.name === 'Admin' || user.email === 'admin@priyo.com'; 
+    const isAdminUser = user.email === 'admin@priyo.com'; 
     
-    // Update user profile immediately with Google data
     setUserProfile(prev => ({ 
       ...prev, 
       name: user.name || prev.name,
@@ -181,13 +185,14 @@ const App: React.FC = () => {
 
     setIsLoggedIn(true);
 
-    // If it's the admin, we skip the name popup
     if (isAdminUser) {
       setView(hasConfirmedAge ? 'profile-selection' : 'age-verification');
     } else {
-      // For regular users, show the Name Input Popup to let them set their preferred nickname
-      setTempNameInput(user.name || '');
-      setShowNameModal(true);
+      if (!user.name) {
+         setShowNameModal(true);
+      } else {
+         setView(hasConfirmedAge ? 'profile-selection' : 'age-verification');
+      }
     }
   };
 
@@ -196,6 +201,9 @@ const App: React.FC = () => {
     setUserProfile(prev => ({ ...prev, name: finalName }));
     localStorage.setItem('priyo_user_name', finalName);
     
+    // Attempt to update name in Supabase profiles if possible
+    supabase.from('profiles').update({ name: finalName }).eq('id', userProfile.id).then(() => {});
+
     setShowNameModal(false);
     setView(hasConfirmedAge ? 'profile-selection' : 'age-verification');
   };
@@ -220,7 +228,8 @@ const App: React.FC = () => {
     setView('profile-detail');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     localStorage.clear();
     setIsLoggedIn(false);
     setHasConfirmedAge(false);
@@ -229,7 +238,6 @@ const App: React.FC = () => {
     setProfiles(INITIAL_PROFILES);
     setChatHistories({});
     setView('landing');
-    auth.signOut(); // Sign out from Firebase
   };
 
   const handlePaymentSubmit = (request: Omit<PaymentRequest, 'id' | 'status' | 'timestamp' | 'userId' | 'userName'>) => {
@@ -252,7 +260,6 @@ const App: React.FC = () => {
     }));
   };
 
-  // Exclusive Content Logic
   const handleUnlockContent = (contentId: string, cost: number): boolean => {
     if (userProfile.credits >= cost) {
       setUserProfile(prev => ({
@@ -265,17 +272,14 @@ const App: React.FC = () => {
     return false;
   };
 
-  // Filter Logic
   const filteredProfiles = profiles.filter(profile => {
     if (activeCategory === 'All') return true;
     return profile.personality.toLowerCase().includes(activeCategory.toLowerCase());
   });
 
   return (
-    // UPDATED BACKGROUND: Sexy, Deep Gradient (Indigo -> Purple -> Black)
     <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-950 to-slate-950 font-['Hind_Siliguri'] overflow-x-hidden relative text-white">
       
-      {/* Global Ambience: Floating Orbs */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
           <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[100px] animate-blob"></div>
           <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-pink-600/20 rounded-full blur-[100px] animate-blob animation-delay-2000"></div>
@@ -329,7 +333,6 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                {/* Credit Wallet Pill (Desktop/Tablet) */}
                 <div 
                   onClick={() => setShowCreditModal(true)} 
                   className="hidden sm:flex items-center gap-2 bg-slate-900/60 backdrop-blur-md border border-yellow-500/20 px-4 py-3 rounded-2xl cursor-pointer hover:border-yellow-500/50 transition-all shadow-lg"
@@ -351,7 +354,6 @@ const App: React.FC = () => {
               </div>
             </header>
 
-            {/* Filter Bar */}
             <div className="flex gap-3 overflow-x-auto pb-8 scrollbar-hide">
               {PROFILE_CATEGORIES.map(category => (
                 <button 
@@ -383,9 +385,6 @@ const App: React.FC = () => {
           </main>
         )}
 
-        {/* Modals & Sub-views */}
-        
-        {/* Name Input Modal (Triggered after Login) */}
         {showNameModal && (
           <div className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in zoom-in duration-300">
              <div className="max-w-md w-full glass p-10 rounded-[3rem] border-white/10 bg-black/40 text-center relative">

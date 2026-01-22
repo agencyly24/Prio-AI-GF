@@ -29,14 +29,17 @@ class GeminiService {
   private modelName = 'gemini-3-flash-preview';
 
   constructor() {
-    // API KEY must be obtained exclusively from process.env.API_KEY
-    // Safety check: Use a placeholder if empty to prevent 'ApiError: API key must be set' crash on startup.
-    // The actual API call will fail gracefully later if the key is invalid.
-    const apiKey = process.env.API_KEY || "missing-api-key";
-    
-    if (apiKey === "missing-api-key") {
-      console.warn("⚠️ Gemini API Key is missing! Chat features will not work. Please set API_KEY in your environment.");
+    // API KEY must be obtained exclusively from process.env.API_KEY.
+    // In vite.config.ts, we map GOOGLE_API_KEY to process.env.API_KEY if needed.
+    let apiKey = process.env.API_KEY;
+
+    // Safety fallback: if the key is empty string or undefined, use a placeholder
+    // so the app doesn't crash with "ApiError: API key must be set".
+    if (!apiKey || apiKey.trim() === "") {
+      console.warn("⚠️ Gemini API Key is missing! Chat features will not work. Please set GOOGLE_API_KEY or API_KEY in your environment.");
+      apiKey = "missing-api-key";
     }
+
     this.ai = new GoogleGenAI({ apiKey });
   }
 
