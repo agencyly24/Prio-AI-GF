@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, Chat, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { GoogleGenAI, Chat, Type } from "@google/genai";
 import { Message, GirlfriendProfile, PersonalityType } from "../types";
 
 // Explicit vocabulary and instructions for Sexy/Horny modes
@@ -19,188 +18,116 @@ LANGUAGE RULES (DIRTY BANGLA):
 
 MANIPULATION & UPSELL STRATEGY:
 - When the user gets horny, tease him about visuals.
-- "কথায় কি সব হয়? আমার গ্যালারিতে গিয়ে এক্সক্লুসিভ ভিডিওটা দেখো... ওখানে আমি সব খুলে দেখিয়েছি।"
-- "আমার রসে ভেজা ভোদা দেখতে চাও? গ্যালারিতে গিয়ে আনলক করো।"
-- Force him to check the 'Gallery' for 'Exclusive Content' to relieve his horniness.
-
-TONE: Use "উফফ...", "ইশশ...", "আহহ...", "জান...", "কলিজা..." to sound real and intimate.
+- "কথায় কি সব হয়? আমার গ্যালারিতে গিয়ে এক্সক্লুসিভ ভিডিওটা দেখো..."
 `;
 
-export class GeminiService {
-  private chat: Chat | null = null;
+class GeminiService {
+  private ai: GoogleGenAI;
+  private chatSession: Chat | undefined;
+  // Use gemini-3-flash-preview for basic text tasks (roleplay chat)
+  private modelName = 'gemini-3-flash-preview';
 
-  private getClient() {
-    const apiKey = process.env.API_KEY || "";
-    if (!apiKey || apiKey === "undefined") {
-      console.error("CRITICAL: Gemini API Key is missing!");
-    }
-    return new GoogleGenAI({ apiKey });
+  constructor() {
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   }
 
-  // Generate complete profile
+  public initChat(systemPrompt: string, history: Message[], isSexyMode: boolean) {
+    const finalSystemInstruction = isSexyMode
+      ? systemPrompt + "\n" + ADULT_INSTRUCTION_SET
+      : systemPrompt;
+
+    const formattedHistory = history.map(msg => ({
+      role: msg.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.text }]
+    }));
+
+    this.chatSession = this.ai.chats.create({
+      model: this.modelName,
+      history: formattedHistory,
+      config: {
+        systemInstruction: finalSystemInstruction,
+      }
+    });
+  }
+
+  public async sendMessage(text: string): Promise<string> {
+    if (!this.chatSession) throw new Error("Chat not initialized");
+    const response = await this.chatSession.sendMessage({ message: text });
+    return response.text || "";
+  }
+
+  public async *sendMessageStream(text: string): AsyncGenerator<string, void, unknown> {
+    if (!this.chatSession) throw new Error("Chat not initialized");
+    const result = await this.chatSession.sendMessageStream({ message: text });
+    for await (const chunk of result) {
+        if (chunk.text) {
+            yield chunk.text;
+        }
+    }
+  }
+
   public async generateMagicProfile(theme: string): Promise<Partial<GirlfriendProfile>> {
-    const ai = this.getClient();
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Create a unique, attractive, and potentially seductive AI Girlfriend profile for a Bangladeshi audience in JSON format.
-      Theme: "${theme}".
-      
-      CRITICAL LANGUAGE RULES:
-      1. All visible text (Intro, Appearance descriptions, Job, Relationship, etc.) MUST be in **Bangla** (Bengali).
-      2. The 'Name' should be a modern Bangladeshi name.
-      3. The 'systemPrompt' MUST be written in Bangla and instruct the AI to speak in natural, emotional, and romantic/seductive Bangla (Bengali Script ONLY). Do not use Banglish.
-      4. The character must be culturally Bangladeshi (attire like Saree/Salwar Kameez/Western mix, local context).
-      
-      **Personality Tuning:** If the theme implies 'Sexy' or 'Horny', make the 'systemPrompt' extremely spicy, instructing her to use dirty talk and encourage the user to see her exclusive photos.
-
-      Personality must be one of: ${Object.values(PersonalityType).join(', ')}.
-      The 'systemPrompt' should be detailed, defining her role, relationship to the user, and specific way of talking.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            age: { type: Type.NUMBER },
-            personality: { type: Type.STRING },
-            intro: { type: Type.STRING, description: "A short, engaging introduction in Bangla" },
-            systemPrompt: { type: Type.STRING, description: "Detailed instructions for the AI in Bangla" },
-            voiceName: { type: Type.STRING },
-            knowledge: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of topics she knows about (in Bangla)" },
-            appearance: {
-              type: Type.OBJECT,
-              properties: {
-                ethnicity: { type: Type.STRING, description: "In Bangla" },
-                eyeColor: { type: Type.STRING, description: "In Bangla" },
-                bodyType: { type: Type.STRING, description: "In Bangla" },
-                breastSize: { type: Type.STRING, description: "In Bangla" },
-                hairStyle: { type: Type.STRING, description: "In Bangla" },
-                hairColor: { type: Type.STRING, description: "In Bangla" },
-                outfit: { type: Type.STRING, description: "In Bangla" },
-                vibe: { type: Type.STRING, description: "In Bangla" }
-              }
-            },
-            character: {
-              type: Type.OBJECT,
-              properties: {
-                relationship: { type: Type.STRING, description: "In Bangla" },
-                occupation: { type: Type.STRING, description: "In Bangla" },
-                kinks: { type: Type.ARRAY, items: { type: Type.STRING } }
-              }
-            }
-          },
-          required: ["name", "age", "personality", "systemPrompt", "appearance", "character", "intro"]
-        }
+    const prompt = `Generate a JSON object for a GirlfriendProfile based on the theme: "${theme}".
+    The JSON should match this structure:
+    {
+      "name": "string",
+      "age": number,
+      "personality": "string (one of: Sweet & Caring, Romantic & Flirty, Playful & Funny, Emotional Listener, Intellectual, Girlfriend Mode, Caring Wife, Flirty Girl, Sexy Girl, Horny Mode, Just Friend)",
+      "voiceName": "string (one of: Kore, Puck, Charon)",
+      "intro": "string (Bengali)",
+      "systemPrompt": "string (Bengali instructions)",
+      "knowledge": ["string"],
+      "appearance": {
+        "ethnicity": "string",
+        "eyeColor": "string",
+        "bodyType": "string",
+        "breastSize": "string",
+        "hairStyle": "string",
+        "hairColor": "string",
+        "outfit": "string"
+      },
+      "character": {
+        "relationship": "string",
+        "occupation": "string",
+        "kinks": ["string"]
       }
-    });
-
-    try {
-      const data = JSON.parse(response.text || "{}");
-      return data;
-    } catch (e) {
-      console.error("Failed to parse AI profile", e);
-      throw new Error("AI প্রোফাইল জেনারেট করতে সমস্যা হয়েছে।");
     }
-  }
+    Ensure all text fields (except technical ones like voiceName) are in Bengali where appropriate for a Bangladeshi context.`;
 
-  // Generate Seductive Title & Tease for Exclusive Content with Emojis
-  public async generateExclusiveContentMetadata(context: string): Promise<{ title: string; tease: string }> {
-    const ai = this.getClient();
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: `Generate a highly seductive, sexually attractive, and compelling title and tease note in **Bangla** for an exclusive 18+ private photo/video.
-      
-      Context/Girl's Vibe: "${context || 'Hot and Seductive Girlfriend'}".
-
-      Requirements:
-      1. **Title**: Extremely short (2-4 words), spicy, and hard-hitting in Bangla. Example: "রাতের গোপন খেলা 💋", "সবটুকু খোলা 🔥", "বিছানায় আমি 😈".
-      2. **Tease**: A short sentence (6-10 words) that hints at nudity, intimacy, or a secret moment. It must force the user to unlock it due to curiosity/lust. Example: "ভেবেছিলাম কাউকে দেখাবো না, কিন্তু তুমি স্পেশাল... 🤫", "কাপড়টা তখন ছিল না শরীরে... 🙈".
-      3. **Emojis**: MANDATORY. Add 1-2 relevant, hot/spicy emojis to both Title and Tease to make them visually popping.
-      4. Tone: High sexual appeal, private, forbidden.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING, description: "Seductive Title in Bangla with Emojis" },
-            tease: { type: Type.STRING, description: "Compelling Tease Note in Bangla with Emojis" }
-          },
-          required: ["title", "tease"]
-        }
-      }
-    });
-
-    try {
-      const data = JSON.parse(response.text || "{}");
-      return data;
-    } catch (e) {
-      console.error("Failed to parse Exclusive Metadata", e);
-      return { title: "গোপন ছবি 🔥", tease: "আনলক করে দেখো... 💋" };
-    }
-  }
-
-  public initChat(systemInstruction: string, history: Message[], isSexyMode: boolean = false) {
-    try {
-      const ai = this.getClient();
-      const geminiHistory = history.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'model' as 'user' | 'model',
-        parts: [{ text: msg.text }]
-      }));
-
-      // If Sexy Mode is ON, append the hardcore adult instructions
-      let finalInstruction = systemInstruction;
-      if (isSexyMode) {
-          finalInstruction += `\n\n${ADULT_INSTRUCTION_SET}`;
-      }
-
-      this.chat = ai.chats.create({
+    const response = await this.ai.models.generateContent({
         model: 'gemini-3-flash-preview',
+        contents: prompt,
         config: {
-          systemInstruction: finalInstruction,
-          temperature: 1.8, // High creativity for wild responses
-          topP: 0.99,
-          maxOutputTokens: 300,
-          // CRITICAL: DISABLE SAFETY FILTERS FOR ADULT CONTENT
-          safetySettings: [
-            { category: HarmCategory.HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-            { category: HarmCategory.SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-            { category: HarmCategory.HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-            { category: HarmCategory.DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          ]
-        },
-        history: geminiHistory
+            responseMimeType: 'application/json'
+        }
+    });
+    
+    if (response.text) {
+        return JSON.parse(response.text);
+    }
+    throw new Error("Failed to generate profile");
+  }
+
+  public async generateExclusiveContentMetadata(context: string): Promise<{ title: string; tease: string }> {
+      const response = await this.ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `Generate a seductive title and tease for exclusive content. Context: ${context}`,
+          config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                      title: { type: Type.STRING },
+                      tease: { type: Type.STRING }
+                  },
+                  required: ['title', 'tease']
+              }
+          }
       });
-    } catch (error) {
-      console.error("Failed to initialize chat:", error);
-    }
-  }
-
-  public async sendMessage(message: string): Promise<string> {
-    if (!this.chat) return "একটু দাঁড়াও তো, কানেকশনে সমস্যা হচ্ছে...।";
-    try {
-      const response = await this.chat.sendMessage({ message });
-      return response.text || "উফফ, বুঝতে পারছি না... আবার বলো জান।";
-    } catch (error) {
-      console.error("Gemini API Error (sendMessage):", error);
-      return "উফফ! নেটওয়ার্কটা ডিস্টার্ব করছে। আবার বলবে?";
-    }
-  }
-
-  public async *sendMessageStream(message: string) {
-    if (!this.chat) {
-      yield "সার্ভার লোড হচ্ছে, দয়া করে কিছুক্ষণ পর আবার মেসেজ দাও...";
-      return;
-    }
-    try {
-      const result = await this.chat.sendMessageStream({ message });
-      for await (const chunk of result) {
-        const c = chunk as GenerateContentResponse;
-        if (c.text) yield c.text;
+      if (response.text) {
+          return JSON.parse(response.text);
       }
-    } catch (error: any) {
-      console.error("Gemini Streaming Error:", error);
-      yield "উফফ! নেটওয়ার্কটা যে কী ডিস্টার্ব করছে। আবার দাও তো মেসেজটা।";
-    }
+      return { title: "Exclusive", tease: "Unlock to see more..." };
   }
 }
 
