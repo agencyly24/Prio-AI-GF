@@ -42,7 +42,8 @@ const DEFAULT_USER: UserProfile = {
 const PROFILE_CATEGORIES = ['All', 'Sweet', 'Romantic', 'Flirty', 'Sexy', 'Horny', 'Wife'];
 
 // Helper to prevent crash on bad JSON
-const safeJsonParse = <T>(key: string, fallback: T): T => {
+// Fixed: Added trailing comma to generic type T to support arrow function in TSX
+const safeJsonParse = <T,>(key: string, fallback: T): T => {
   try {
     const item = localStorage.getItem(key);
     return item ? JSON.parse(item) : fallback;

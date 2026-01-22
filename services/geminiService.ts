@@ -28,8 +28,8 @@ class GeminiService {
   private modelName = 'gemini-3-flash-preview';
 
   constructor() {
-    const apiKey = process.env.API_KEY || "missing-key";
-    this.ai = new GoogleGenAI({ apiKey });
+    // API KEY must be obtained exclusively from process.env.API_KEY
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   }
 
   public initChat(systemPrompt: string, history: Message[], isSexyMode: boolean) {
@@ -37,4 +37,106 @@ class GeminiService {
       ? systemPrompt + "\n" + ADULT_INSTRUCTION_SET
       : systemPrompt;
 
-    const formattedHistory = history.map(msg
+    const formattedHistory = history.map(msg => ({
+      role: msg.sender === 'user' ? 'user' : 'model',
+      parts: [{ text: msg.text }]
+    }));
+
+    this.chatSession = this.ai.chats.create({
+      model: this.modelName,
+      history: formattedHistory,
+      config: {
+        systemInstruction: finalSystemInstruction,
+        // Using string literals for safety settings to ensure compatibility with @google/genai SDK
+        safetySettings: [
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+        ]
+      }
+    });
+  }
+
+  public async sendMessage(text: string): Promise<string> {
+    if (!this.chatSession) throw new Error("Chat not initialized");
+    const response = await this.chatSession.sendMessage({ message: text });
+    return response.text || "";
+  }
+
+  public async *sendMessageStream(text: string): AsyncGenerator<string, void, unknown> {
+    if (!this.chatSession) throw new Error("Chat not initialized");
+    const result = await this.chatSession.sendMessageStream({ message: text });
+    for await (const chunk of result) {
+        if (chunk.text) {
+            yield chunk.text;
+        }
+    }
+  }
+
+  public async generateMagicProfile(theme: string): Promise<Partial<GirlfriendProfile>> {
+    const prompt = `Generate a JSON object for a GirlfriendProfile based on the theme: "${theme}".
+    The JSON should match this structure:
+    {
+      "name": "string",
+      "age": number,
+      "personality": "string (one of: Sweet & Caring, Romantic & Flirty, Playful & Funny, Emotional Listener, Intellectual, Girlfriend Mode, Caring Wife, Flirty Girl, Sexy Girl, Horny Mode, Just Friend)",
+      "voiceName": "string (one of: Kore, Puck, Charon)",
+      "intro": "string (Bengali)",
+      "systemPrompt": "string (Bengali instructions)",
+      "knowledge": ["string"],
+      "appearance": {
+        "ethnicity": "string",
+        "eyeColor": "string",
+        "bodyType": "string",
+        "breastSize": "string",
+        "hairStyle": "string",
+        "hairColor": "string",
+        "outfit": "string"
+      },
+      "character": {
+        "relationship": "string",
+        "occupation": "string",
+        "kinks": ["string"]
+      }
+    }
+    Ensure all text fields (except technical ones like voiceName) are in Bengali where appropriate for a Bangladeshi context.`;
+
+    const response = await this.ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+        config: {
+            responseMimeType: 'application/json'
+        }
+    });
+    
+    if (response.text) {
+        return JSON.parse(response.text);
+    }
+    throw new Error("Failed to generate profile");
+  }
+
+  public async generateExclusiveContentMetadata(context: string): Promise<{ title: string; tease: string }> {
+      const response = await this.ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `Generate a seductive title and tease for exclusive content. Context: ${context}`,
+          config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                      title: { type: Type.STRING },
+                      tease: { type: Type.STRING }
+                  },
+                  required: ['title', 'tease']
+              }
+          }
+      });
+      if (response.text) {
+          return JSON.parse(response.text);
+      }
+      return { title: "Exclusive", tease: "Unlock to see more..." };
+  }
+}
+
+export const gemini = new GeminiService();
