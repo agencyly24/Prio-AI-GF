@@ -85,8 +85,9 @@ export interface GirlfriendProfile {
 
 export interface UserProfile {
   id: string;
+  uid: string; // Ensuring UID is always present
   name: string;
-  email?: string; // Add email property
+  email: string;
   avatar: string;
   bio: string;
   level: number;
@@ -96,14 +97,11 @@ export interface UserProfile {
   isPremium: boolean;
   isVIP: boolean;
   isAdmin: boolean;
-  
-  // New Authentication Fields
-  approved: boolean;
-  purchased: boolean; // New field as requested
   role: 'user' | 'admin';
 
   subscriptionExpiry?: string; // ISO Date string for expiration tracking
-  // New Wallet Fields
+  
+  // Wallet Fields
   credits: number; 
   unlockedContentIds: string[];
   stats: {
@@ -124,7 +122,7 @@ export interface PaymentRequest {
   bkashNumber: string;
   trxId: string;
   status: 'pending' | 'approved' | 'rejected';
-  timestamp: string;
+  timestamp: string; // ISO string
   couponUsed?: string;
   referralId?: string;
 }

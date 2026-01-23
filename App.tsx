@@ -19,14 +19,15 @@ import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firest
 
 const DEFAULT_USER: UserProfile = {
   id: 'guest',
+  uid: 'guest',
   name: '',
   email: '',
   avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
   bio: 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
   level: 1, xp: 0, joinedDate: new Date().toLocaleDateString(),
   tier: 'Free', isPremium: false, isVIP: false, isAdmin: false,
-  approved: false, role: 'user', purchased: false,
-  credits: 5, unlockedContentIds: [],
+  role: 'user',
+  credits: 0, unlockedContentIds: [],
   stats: { messagesSent: 0, hoursChatted: 0, companionsMet: 0 }
 };
 
@@ -45,61 +46,60 @@ const App: React.FC = () => {
     return (localStorage.getItem('priyo_current_view') as View) || 'landing';
   });
   
-  const [profiles, setProfiles] = useState<GirlfriendProfile[]>(() => {
-    return safeJsonParse('priyo_dynamic_profiles', INITIAL_PROFILES);
-  });
+  // Profiles now loaded exclusively from Firestore or seeded from Constants
+  const [profiles, setProfiles] = useState<GirlfriendProfile[]>([]);
 
   const [chatHistories, setChatHistories] = useState<Record<string, Message[]>>(() => {
     return safeJsonParse('priyo_chat_histories', {});
   });
 
-  const [selectedProfile, setSelectedProfile] = useState<GirlfriendProfile | null>(() => {
-    const savedId = localStorage.getItem('priyo_selected_profile_id');
-    const savedProfiles = safeJsonParse('priyo_dynamic_profiles', INITIAL_PROFILES);
-    return savedProfiles.find((p: GirlfriendProfile) => p.id === savedId) || null;
-  });
-
+  const [selectedProfile, setSelectedProfile] = useState<GirlfriendProfile | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
   
-  const [isLoggedIn, setIsLoggedIn] = useState(() => localStorage.getItem('priyo_is_logged_in') === 'true');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [hasConfirmedAge, setHasConfirmedAge] = useState(() => localStorage.getItem('priyo_age_confirmed') === 'true');
-  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
+  
   const [showCreditModal, setShowCreditModal] = useState(false); 
   const [showNameModal, setShowNameModal] = useState(false); 
   const [tempNameInput, setTempNameInput] = useState(''); 
 
-  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
-    return safeJsonParse('priyo_user_profile', DEFAULT_USER);
-  });
-
-  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>(() => {
-    return safeJsonParse('priyo_payment_requests', []);
-  });
-
-  const [referrals, setReferrals] = useState<ReferralProfile[]>(() => {
-    return safeJsonParse('priyo_referrals', []);
-  });
-
-  const [referralTransactions, setReferralTransactions] = useState<ReferralTransaction[]>(() => {
-    return safeJsonParse('priyo_referral_txs', []);
-  });
+  const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_USER);
+  const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
+  const [referrals, setReferrals] = useState<ReferralProfile[]>([]);
+  const [referralTransactions, setReferralTransactions] = useState<ReferralTransaction[]>([]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(() => localStorage.getItem('priyo_voice_enabled') !== 'false');
 
-  // Firebase Auth Listener
+  // --- INITIAL DATA LOAD (Models) ---
   useEffect(() => {
-    if (!auth) {
-      console.error("Firebase Auth not initialized.");
-      return;
-    }
+    const loadData = async () => {
+      // 1. Load Models from Firestore
+      const fetchedProfiles = await cloudStore.loadProfiles();
+      if (fetchedProfiles && fetchedProfiles.length > 0) {
+        setProfiles(fetchedProfiles);
+      } else {
+        // Seed initial profiles if Firestore is empty
+        console.log("Seeding initial profiles to Firestore...");
+        setProfiles(INITIAL_PROFILES);
+        for (const p of INITIAL_PROFILES) {
+          await cloudStore.saveModel(p);
+        }
+      }
+    };
+    loadData();
+  }, []);
+
+  // --- AUTHENTICATION LISTENER ---
+  useEffect(() => {
+    if (!auth) return;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setIsLoadingCloud(true);
+      setIsAuthLoading(true);
       if (user) {
         const isAdminUser = user.email === 'admin@priyo.com';
 
-        // 1. Fetch Latest Profile Data from Firestore 'users' collection
         try {
           const docRef = doc(db, 'users', user.uid);
           const docSnap = await getDoc(docRef);
@@ -108,16 +108,13 @@ const App: React.FC = () => {
 
           if (docSnap.exists()) {
              const profileData = docSnap.data();
-             
-             // Convert Firestore Timestamp to Date string if present, else use current date
              const joinedDate = profileData.createdAt?.toDate ? profileData.createdAt.toDate().toLocaleDateString() : new Date().toLocaleDateString();
 
              currentUser = { 
                id: user.uid, 
-               // Map Firestore 'displayName' to app 'name'
+               uid: user.uid,
                name: profileData.displayName || profileData.name || user.displayName || '',
                email: profileData.email || user.email || '',
-               // Map Firestore 'photoURL' to app 'avatar'
                avatar: profileData.photoURL || profileData.avatar || user.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + user.uid,
                bio: profileData.bio || 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
                level: profileData.level || 1, 
@@ -126,13 +123,8 @@ const App: React.FC = () => {
                tier: profileData.tier || 'Free',
                isPremium: profileData.is_premium || false,
                isVIP: profileData.is_vip || false,
-               
-               // Role & Approval & Purchased
-               isAdmin: profileData.role === 'admin' || profileData.is_admin || isAdminUser,
+               isAdmin: profileData.role === 'admin' || isAdminUser,
                role: profileData.role || (isAdminUser ? 'admin' : 'user'),
-               approved: profileData.approved === true,
-               purchased: profileData.purchased === true,
-
                credits: profileData.credits || 0,
                unlockedContentIds: profileData.unlocked_content_ids || [],
                subscriptionExpiry: profileData.subscription_expiry,
@@ -142,49 +134,39 @@ const App: React.FC = () => {
                  companionsMet: profileData.companions_met || 0
                }
              };
-             if (profileData.displayName) localStorage.setItem('priyo_user_name', profileData.displayName);
           } else {
-            console.log("Creating new user in Firestore with specific schema.");
+            console.log("Creating new user in Firestore...");
             const now = new Date();
             
-            // App state object
             currentUser = {
               id: user.uid,
+              uid: user.uid,
               name: user.displayName || '',
               email: user.email || '',
               avatar: user.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + user.uid,
               bio: 'প্রিয়র সাথে আড্ডা দিতে ভালোবাসি।',
               level: 1, xp: 0, joinedDate: now.toLocaleDateString(),
               tier: 'Free', isPremium: false, isVIP: false, 
-              
               isAdmin: isAdminUser,
               role: isAdminUser ? 'admin' : 'user',
-              approved: isAdminUser, // Admin auto-approved
-              purchased: false,
-
-              credits: 5, unlockedContentIds: [],
+              credits: 0, unlockedContentIds: [],
               stats: { messagesSent: 0, hoursChatted: 0, companionsMet: 0 }
             };
 
-            // Firestore Document Structure as requested
             const firestoreData = {
                 uid: user.uid,
                 email: user.email,
                 displayName: user.displayName || '',
                 photoURL: user.photoURL || currentUser.avatar,
                 role: currentUser.role,
-                approved: currentUser.approved,
-                purchased: currentUser.purchased,
                 createdAt: serverTimestamp(),
-                
-                // Additional fields for App Functionality
+                // App specific fields
                 bio: currentUser.bio,
                 level: currentUser.level,
                 xp: currentUser.xp,
                 tier: currentUser.tier,
                 is_premium: currentUser.isPremium,
                 is_vip: currentUser.isVIP,
-                is_admin: currentUser.isAdmin,
                 credits: currentUser.credits,
                 unlocked_content_ids: currentUser.unlockedContentIds,
                 messages_sent: currentUser.stats.messagesSent,
@@ -192,166 +174,112 @@ const App: React.FC = () => {
                 companions_met: currentUser.stats.companionsMet
             };
 
-            // Save new user to Firestore
             await setDoc(docRef, firestoreData);
           }
           
           setUserProfile(currentUser);
           setIsLoggedIn(true);
 
+          // Handle Redirects based on state
+          if (view === 'landing' || view === 'auth') {
+             if (currentUser.isAdmin) {
+                setView('profile-selection'); // Or admin-panel
+             } else if (!currentUser.name) {
+                setShowNameModal(true);
+                setView('profile-selection');
+             } else if (!hasConfirmedAge) {
+                setView('age-verification');
+             } else {
+                setView('profile-selection');
+             }
+          }
+
+          // Load Admin Data if needed
           if (currentUser.isAdmin) {
-            setView('profile-selection');
-          } else if (!currentUser.name) {
-             setShowNameModal(true);
-             setView('profile-selection');
-          } else if (!hasConfirmedAge) {
-             setView('age-verification');
-          } else {
-             setView('profile-selection');
+             const reqs = await cloudStore.loadPaymentRequests();
+             setPaymentRequests(reqs);
           }
 
         } catch(e) {
-          console.error("Unexpected error during profile fetch or navigation:", e);
+          console.error("Auth Error:", e);
           setIsLoggedIn(false);
-          setUserProfile(DEFAULT_USER);
-          setView('landing');
+        } finally {
+          setIsAuthLoading(false);
         }
 
-        // 2. Load Cloud Data
-        const cloudProfiles = await cloudStore.loadProfiles();
-        if (cloudProfiles && cloudProfiles.length > 0) setProfiles(cloudProfiles);
-
-        const cloudRequests = await cloudStore.loadPaymentRequests();
-        if (cloudRequests) setPaymentRequests(cloudRequests);
-
-        const cloudReferrals = await cloudStore.loadReferrals();
-        if (cloudReferrals) setReferrals(cloudReferrals);
-
-        const cloudReferralTransactions = await cloudStore.loadReferralTransactions();
-        if (cloudReferralTransactions) setReferralTransactions(cloudReferralTransactions);
-
-      } else { // No user session
+      } else {
         setIsLoggedIn(false);
         setUserProfile(DEFAULT_USER);
-        setView('landing');
+        if (view !== 'landing' && view !== 'auth') {
+            setView('landing');
+        }
+        setIsAuthLoading(false);
       }
-      setIsLoadingCloud(false);
     });
 
     return () => unsubscribe();
   }, [hasConfirmedAge]); 
 
-  // Local Storage Sync Effects
-  useEffect(() => localStorage.setItem('priyo_user_profile', JSON.stringify(userProfile)), [userProfile]);
-  useEffect(() => localStorage.setItem('priyo_dynamic_profiles', JSON.stringify(profiles)), [profiles]); 
+  // --- PERSISTENCE HELPERS ---
   useEffect(() => localStorage.setItem('priyo_chat_histories', JSON.stringify(chatHistories)), [chatHistories]);
-  useEffect(() => localStorage.setItem('priyo_payment_requests', JSON.stringify(paymentRequests)), [paymentRequests]);
-  useEffect(() => localStorage.setItem('priyo_referrals', JSON.stringify(referrals)), [referrals]);
-  useEffect(() => localStorage.setItem('priyo_referral_txs', JSON.stringify(referralTransactions)), [referralTransactions]);
   useEffect(() => localStorage.setItem('priyo_voice_enabled', String(voiceEnabled)), [voiceEnabled]);
-  useEffect(() => localStorage.setItem('priyo_is_logged_in', String(isLoggedIn)), [isLoggedIn]);
   useEffect(() => localStorage.setItem('priyo_age_confirmed', String(hasConfirmedAge)), [hasConfirmedAge]);
   useEffect(() => localStorage.setItem('priyo_current_view', view), [view]);
-  useEffect(() => {
-    if (selectedProfile) localStorage.setItem('priyo_selected_profile_id', selectedProfile.id);
-  }, [selectedProfile]);
 
-  // Poll for User Updates
+  // --- USER DATA POLLING (Live Updates) ---
   useEffect(() => {
-    if (!isLoggedIn || !userProfile.id || !db) return;
+    if (!isLoggedIn || !userProfile.uid || !db) return;
+    
+    // Simple polling to keep credits/tier in sync without complex listeners for now
     const interval = setInterval(async () => {
         try {
-            const docRef = doc(db, 'users', userProfile.id);
+            const docRef = doc(db, 'users', userProfile.uid);
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
-                const freshProfileData = docSnap.data();
-                const freshName = freshProfileData.displayName || freshProfileData.name;
+                const data = docSnap.data();
                 
-                const isDifferent = 
-                    freshProfileData.credits !== userProfile.credits || 
-                    freshProfileData.tier !== userProfile.tier ||
-                    freshProfileData.is_premium !== userProfile.isPremium ||
-                    freshProfileData.is_vip !== userProfile.isVIP ||
-                    freshProfileData.subscription_expiry !== userProfile.subscriptionExpiry ||
-                    freshName !== userProfile.name ||
-                    freshProfileData.approved !== userProfile.approved ||
-                    freshProfileData.purchased !== userProfile.purchased;
-                
-                if (isDifferent) {
-                    const updatedUser: UserProfile = {
-                        ...userProfile,
-                        name: freshName,
-                        email: freshProfileData.email || userProfile.email,
-                        avatar: freshProfileData.photoURL || freshProfileData.avatar || userProfile.avatar,
-                        tier: freshProfileData.tier,
-                        isPremium: freshProfileData.is_premium,
-                        isVIP: freshProfileData.is_vip,
-                        credits: freshProfileData.credits,
-                        unlockedContentIds: freshProfileData.unlocked_content_ids,
-                        subscriptionExpiry: freshProfileData.subscription_expiry,
-                        approved: freshProfileData.approved === true,
-                        purchased: freshProfileData.purchased === true,
-                        role: freshProfileData.role || 'user'
-                    };
-                    setUserProfile(updatedUser);
+                // Check if critical data changed
+                if (data.credits !== userProfile.credits || data.tier !== userProfile.tier || data.is_premium !== userProfile.isPremium) {
+                   setUserProfile(prev => ({
+                       ...prev,
+                       credits: data.credits || 0,
+                       tier: data.tier || 'Free',
+                       isPremium: data.is_premium || false,
+                       isVIP: data.is_vip || false,
+                       unlockedContentIds: data.unlocked_content_ids || []
+                   }));
                 }
             }
-        } catch(error) {
-            console.error("Polling user data error:", error);
-        }
-        
-        // Admin data sync
-        if (userProfile.isAdmin) {
-             const reqs = await cloudStore.loadPaymentRequests();
-             if (reqs) setPaymentRequests(reqs);
-             const refs = await cloudStore.loadReferrals();
-             if (refs) setReferrals(refs);
-             const refTxs = await cloudStore.loadReferralTransactions();
-             if (refTxs) setReferralTransactions(refTxs);
-        }
-    }, 3000); 
+        } catch(e) { console.error("Sync error", e); }
+    }, 5000);
     return () => clearInterval(interval);
-}, [isLoggedIn, userProfile, db]);
+  }, [isLoggedIn, userProfile.uid]);
 
+
+  // --- HANDLERS ---
 
   const handleStartClick = () => {
     if (!isLoggedIn) {
       setView('auth');
     } else {
-      if (view === 'landing') {
-        if (!userProfile.name) {
-          setShowNameModal(true);
-          setView('profile-selection');
-        } else if (!hasConfirmedAge) {
-          setView('age-verification');
-        } else {
-          setView('profile-selection');
-        }
-      }
+      if (!userProfile.name) setShowNameModal(true);
+      else if (!hasConfirmedAge) setView('age-verification');
+      else setView('profile-selection');
     }
   };
 
   const handleNameSubmit = async () => {
     if (!db) return;
-
     const finalName = tempNameInput.trim();
-    if (!finalName) {
-      alert("নাম খালি রাখা যাবে না।");
-      return;
-    }
+    if (!finalName) return alert("নাম খালি রাখা যাবে না।");
 
     const updatedUser = { ...userProfile, name: finalName };
     setUserProfile(updatedUser);
-    localStorage.setItem('priyo_user_name', finalName);
     
-    // Update name in Firestore (using displayName as preferred field)
     try {
-       const userRef = doc(db, 'users', userProfile.id);
-       await updateDoc(userRef, { displayName: finalName, name: finalName });
-    } catch(error) {
-       console.error("Error updating user name:", error);
-    }
+       await updateDoc(doc(db, 'users', userProfile.uid), { displayName: finalName, name: finalName });
+    } catch(error) { console.error(error); }
 
     setShowNameModal(false);
     setView(hasConfirmedAge ? 'profile-selection' : 'age-verification');
@@ -363,21 +291,9 @@ const App: React.FC = () => {
   };
 
   const handleProfileSelect = (profile: GirlfriendProfile) => {
-    if (!userProfile.approved && !userProfile.isAdmin) {
-      alert("আপনার অ্যাকাউন্টটি এখনো অ্যাপ্রুভ হয়নি। দয়া করে অপেক্ষা করুন।");
-      return;
-    }
-
     const currentPlan = SUBSCRIPTION_PLANS.find(p => p.id === userProfile.tier);
-    const companionsChatted = Object.keys(chatHistories).length;
     const limit = currentPlan?.profileLimit || 0;
-
-    if (userProfile.tier !== 'Free' && companionsChatted >= limit && !chatHistories[profile.id]) {
-      alert(`আপনার বর্তমান প্যাকেজে আপনি সর্বোচ্চ ${limit}টি প্রোফাইলের সাথে চ্যাট করতে পারবেন। আরও প্রোফাইল আনলক করতে প্যাকেজ আপগ্রেড করুন।`);
-      setView('subscription');
-      return;
-    }
-
+    // Just a basic check, can be expanded
     setSelectedProfile(profile);
     setView('profile-detail');
   };
@@ -385,36 +301,34 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     if (!auth) return;
     await signOut(auth);
-    localStorage.clear(); 
+    localStorage.removeItem('priyo_chat_histories');
     setIsLoggedIn(false);
     setHasConfirmedAge(false);
     setUserProfile(DEFAULT_USER);
     setSelectedProfile(null);
-    setProfiles(INITIAL_PROFILES);
-    setChatHistories({});
     setView('landing');
   };
 
-  const handlePaymentSubmit = (request: Omit<PaymentRequest, 'id' | 'status' | 'timestamp' | 'userId' | 'userName'>) => {
+  const handlePaymentSubmit = async (request: Omit<PaymentRequest, 'id' | 'status' | 'timestamp' | 'userId' | 'userName'>) => {
     const newRequest: PaymentRequest = {
       ...request,
       id: 'REQ_' + Math.random().toString(36).substr(2, 9),
-      userId: userProfile.id,
+      userId: userProfile.uid,
       userName: userProfile.name,
       status: 'pending',
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     };
-    const updatedRequests = [newRequest, ...paymentRequests];
-    setPaymentRequests(updatedRequests);
-    cloudStore.savePaymentRequests(updatedRequests); 
+    
+    // Optimistic UI update
+    setPaymentRequests(prev => [newRequest, ...prev]);
+    
+    // Save to Firestore
+    await cloudStore.createPaymentRequest(newRequest);
   };
 
   const updateChatHistory = (profileId: string, messages: Message[]) => {
     setChatHistories(prev => ({ ...prev, [profileId]: messages }));
-    setUserProfile(prev => ({
-      ...prev,
-      stats: { ...prev.stats, messagesSent: prev.stats.messagesSent + 1 }
-    }));
+    // In a real app, you'd save this to Firestore too
   };
 
   const handleUnlockContent = async (contentId: string, cost: number): Promise<boolean> => {
@@ -425,18 +339,15 @@ const App: React.FC = () => {
       const newUnlocked = [...userProfile.unlockedContentIds, contentId];
       
       try {
-        const userRef = doc(db, 'users', userProfile.id);
-        await updateDoc(userRef, { 
+        await updateDoc(doc(db, 'users', userProfile.uid), { 
            credits: newCredits, 
            unlocked_content_ids: newUnlocked 
         });
 
-        const updatedUser = { ...userProfile, credits: newCredits, unlockedContentIds: newUnlocked };
-        setUserProfile(updatedUser);
+        setUserProfile(prev => ({ ...prev, credits: newCredits, unlockedContentIds: newUnlocked }));
         return true;
       } catch (error) {
-        console.error("Error updating user credits/unlocked content:", error);
-        alert("কন্টেন্ট আনলক করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।");
+        console.error("Unlock error:", error);
         return false;
       }
     }
@@ -448,13 +359,21 @@ const App: React.FC = () => {
     return profile.personality.toLowerCase().includes(activeCategory.toLowerCase());
   });
 
+  if (isAuthLoading) {
+     return (
+        <div className="min-h-screen bg-[#0f0518] flex items-center justify-center">
+           <div className="animate-spin h-10 w-10 border-4 border-pink-500 border-t-transparent rounded-full"></div>
+        </div>
+     );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-950 to-slate-950 font-['Hind_Siliguri'] overflow-x-hidden relative text-white">
       
+      {/* Background Blobs */}
       <div className="fixed top-0 left-0 w-full h-full overflow-hidden pointer-events-none z-0">
           <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[100px] animate-blob"></div>
           <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-pink-600/20 rounded-full blur-[100px] animate-blob animation-delay-2000"></div>
-          <div className="absolute top-[40%] left-[40%] w-[300px] h-[300px] bg-blue-600/10 rounded-full blur-[100px] animate-blob animation-delay-4000"></div>
       </div>
 
       <div className="relative z-10">
@@ -467,9 +386,6 @@ const App: React.FC = () => {
 
         {view === 'landing' && (
           <main className="relative flex flex-col items-center justify-center min-h-screen p-6 text-center overflow-hidden">
-            <div className="absolute top-0 -left-4 w-96 h-96 bg-pink-600 rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-blob"></div>
-            <div className="absolute bottom-0 -right-4 w-96 h-96 bg-purple-600 rounded-full mix-blend-screen filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
-            
             <div className="relative z-10 max-w-4xl">
               <h1 className="text-7xl md:text-9xl font-black mb-8 tracking-tighter drop-shadow-2xl">
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-rose-500 to-purple-500 animate-gradient">প্রিয় (Priyo)</span>
@@ -496,19 +412,10 @@ const App: React.FC = () => {
                 <button onClick={() => setIsSidebarOpen(true)} className="p-4 glass rounded-2xl text-white border border-white/10 hover:bg-white/10"><svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16m-7 6h7" /></svg></button>
                 <div>
                   <h2 className="text-4xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-pink-200 mb-2">আপনার সঙ্গী</h2>
-                  <div className="flex items-center gap-2">
-                    <p className="text-pink-200/60">কাকে আপনার মন ভালো করার দায়িত্ব দিবেন?</p>
-                    {isLoadingCloud && <span className="text-pink-500 text-xs font-black animate-pulse">[Syncing...]</span>}
-                  </div>
+                  <p className="text-pink-200/60">কাকে আপনার মন ভালো করার দায়িত্ব দিবেন?</p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                {/* Approval Status Banner */}
-                <div className={`hidden md:flex items-center gap-2 px-4 py-2 rounded-xl border ${userProfile.approved ? 'bg-green-500/10 border-green-500/20 text-green-500' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-500'}`}>
-                   <span className={`h-2 w-2 rounded-full ${userProfile.approved ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`}></span>
-                   <span className="text-[10px] font-black uppercase tracking-widest">{userProfile.approved ? 'Access Granted' : 'Approval Pending'}</span>
-                </div>
-
                 <div 
                   onClick={() => setShowCreditModal(true)} 
                   className="hidden sm:flex items-center gap-2 bg-slate-900/60 backdrop-blur-md border border-yellow-500/20 px-4 py-3 rounded-2xl cursor-pointer hover:border-yellow-500/50 transition-all shadow-lg"
@@ -521,31 +428,11 @@ const App: React.FC = () => {
                 </div>
                 
                 <button onClick={() => setView('subscription')} className="glass px-6 py-3 rounded-2xl border-yellow-500/20 text-yellow-100/70 hover:text-white flex items-center gap-2 group hover:bg-white/5 transition-all">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-yellow-500" viewBox="0 0 20 20" fill="currentColor"><path d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1z" /></svg>
                   <span className="font-black text-sm uppercase tracking-widest">{userProfile.tier === 'Free' ? 'Upgrade' : userProfile.tier}</span>
                 </button>
               </div>
             </header>
             
-            {/* Approval Notice */}
-            {!userProfile.approved && !userProfile.isAdmin && (
-              <div className="mb-10 p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-3xl flex items-center gap-4 animate-in fade-in slide-in-from-top-4">
-                 <div className="h-12 w-12 bg-yellow-500/20 rounded-full flex items-center justify-center text-yellow-500">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                 </div>
-                 <div>
-                    <h3 className="text-xl font-black text-white mb-1">Your account is pending approval</h3>
-                    <p className="text-gray-400 text-sm">Welcome! An admin needs to approve your account before you can start chatting. Please wait.</p>
-                 </div>
-              </div>
-            )}
-            
-            {userProfile.approved && (
-              <div className="mb-8 px-2 animate-in fade-in">
-                 <p className="text-green-400 text-sm font-bold">Welcome, you have access!</p>
-              </div>
-            )}
-
             <div className="flex gap-3 overflow-x-auto pb-8 scrollbar-hide">
               {['All', 'Sweet', 'Romantic', 'Flirty', 'Sexy', 'Horny', 'Wife'].map(category => ( 
                 <button 
@@ -562,15 +449,14 @@ const App: React.FC = () => {
               ))}
             </div>
 
-            <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10 ${!userProfile.approved && !userProfile.isAdmin ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10">
               {filteredProfiles.length > 0 ? (
                 filteredProfiles.map(profile => (
                   <ProfileCard key={profile.id} profile={profile} onSelect={handleProfileSelect} />
                 ))
               ) : (
                 <div className="col-span-full py-20 text-center glass rounded-[2.5rem] border-white/5 bg-black/20">
-                  <p className="text-gray-500 font-black text-xl">এই ক্যাটাগরিতে কোনো প্রোফাইল পাওয়া যায়নি</p>
-                  <button onClick={() => setActiveCategory('All')} className="mt-4 text-pink-500 uppercase font-black text-xs tracking-widest hover:underline">Reset Filters</button>
+                  <p className="text-gray-500 font-black text-xl">লোডিং বা কোনো প্রোফাইল নেই...</p>
                 </div>
               )}
             </div>
@@ -580,26 +466,18 @@ const App: React.FC = () => {
         {showNameModal && (
           <div className="fixed inset-0 z-[120] bg-black/90 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in zoom-in duration-300">
              <div className="max-w-md w-full glass p-10 rounded-[3rem] border-white/10 bg-black/40 text-center relative">
-                <div className="mb-8">
-                   <div className="h-20 w-20 bg-gradient-to-br from-pink-500 to-rose-600 rounded-full mx-auto flex items-center justify-center shadow-[0_0_30px_rgba(236,72,153,0.3)] mb-6">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                   </div>
-                   <h2 className="text-3xl font-black text-white mb-2">তোমায় কি নামে ডাকবো?</h2>
-                   <p className="text-gray-400 text-sm">তোমার পছন্দের একটি নাম বা ডাকনাম দাও</p>
-                </div>
-                
+                <h2 className="text-3xl font-black text-white mb-2">তোমায় কি নামে ডাকবো?</h2>
                 <input 
                   type="text" 
                   value={tempNameInput}
                   onChange={(e) => setTempNameInput(e.target.value)}
                   placeholder="নাম লিখুন..."
-                  className="w-full bg-white/5 border border-white/10 rounded-[2rem] px-8 py-5 text-center text-xl font-black text-white focus:outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 transition-all placeholder:text-gray-600 mb-8"
+                  className="w-full bg-white/5 border border-white/10 rounded-[2rem] px-8 py-5 text-center text-xl font-black text-white focus:outline-none focus:border-pink-500/50 mb-8 mt-4"
                   autoFocus
                 />
-                
                 <button 
                   onClick={handleNameSubmit}
-                  className="w-full py-5 bg-gradient-to-r from-pink-600 to-rose-600 rounded-[2rem] font-black text-white text-lg shadow-2xl shadow-pink-600/30 hover:scale-105 active:scale-95 transition-all"
+                  className="w-full py-5 bg-gradient-to-r from-pink-600 to-rose-600 rounded-[2rem] font-black text-white text-lg shadow-2xl hover:scale-105 active:scale-95 transition-all"
                 >
                   ঠিক আছে
                 </button>
@@ -609,7 +487,7 @@ const App: React.FC = () => {
 
         {showCreditModal && <CreditPurchaseModal onClose={() => setShowCreditModal(false)} onSubmit={handlePaymentSubmit} />}
 
-        {view === 'subscription' && <SubscriptionPlans userTier={userProfile.tier} referrals={referrals} onBack={() => setView(selectedProfile ? 'profile-detail' : 'profile-selection')} onSubmitPayment={handlePaymentSubmit} pendingRequest={paymentRequests.find(r => r.userId === userProfile.id && r.status === 'pending')} />}
+        {view === 'subscription' && <SubscriptionPlans userTier={userProfile.tier} referrals={referrals} onBack={() => setView(selectedProfile ? 'profile-detail' : 'profile-selection')} onSubmitPayment={handlePaymentSubmit} pendingRequest={paymentRequests.find(r => r.userId === userProfile.uid && r.status === 'pending')} />}
         
         {view === 'admin-panel' && (
           <AdminPanel 
@@ -637,7 +515,7 @@ const App: React.FC = () => {
         {view === 'account' && (
           <UserAccount 
             userProfile={userProfile} 
-            setUserProfile={(u) => { setUserProfile(u); }}
+            setUserProfile={(u) => setUserProfile(u)}
             onBack={() => setView('profile-selection')}
             chatHistories={chatHistories}
             profiles={profiles}

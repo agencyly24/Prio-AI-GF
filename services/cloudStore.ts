@@ -1,126 +1,140 @@
 
 import { db } from "./firebase";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDocs, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  orderBy,
+  addDoc
+} from "firebase/firestore";
 import { GirlfriendProfile, PaymentRequest, ReferralProfile, ReferralTransaction } from "../types";
 
-// Collection: 'app_data'
-// Documents: 'profiles', 'payment_requests', 'referrals', 'referral_transactions'
+// Firestore Collection Names
+const COLLECTIONS = {
+  MODELS: 'models',
+  PAYMENT_REQUESTS: 'payment_requests',
+  REFERRALS: 'referrals',
+  REFERRAL_TXS: 'referral_transactions'
+};
 
 export const cloudStore = {
-  // Save all profiles to Firestore
-  async saveProfiles(profiles: GirlfriendProfile[]) {
+  // --- MODELS ---
+  
+  // Save or Update a single model
+  async saveModel(profile: GirlfriendProfile) {
     if (!db) return;
     try {
-      await setDoc(doc(db, 'app_data', 'profiles'), { 
-        data: profiles, 
-        updated_at: new Date().toISOString() 
-      });
-      console.log("✅ Profiles synced to Firebase");
+      const modelRef = doc(db, COLLECTIONS.MODELS, profile.id);
+      await setDoc(modelRef, profile, { merge: true });
+      console.log(`✅ Model ${profile.name} saved to Firestore`);
     } catch (e: any) {
-      console.error("❌ Failed to save profiles to Firebase:", e.message);
+      console.error("❌ Failed to save model:", e.message);
       throw e; 
     }
   },
 
-  // Load profiles from Firestore
-  async loadProfiles(): Promise<GirlfriendProfile[] | null> {
-    if (!db) return null;
-    try {
-      const docSnap = await getDoc(doc(db, 'app_data', 'profiles'));
-      if (docSnap.exists()) {
-        console.log("📥 Loaded profiles from Firebase");
-        return docSnap.data().data as GirlfriendProfile[];
-      }
-    } catch (e: any) {
-      console.error("❌ Failed to load profiles from Firebase:", e.message);
-    }
-    return null;
-  },
-
-  // Save Payment Requests to Firestore
-  async savePaymentRequests(requests: PaymentRequest[]) {
+  // Delete a model
+  async deleteModel(modelId: string) {
     if (!db) return;
     try {
-      await setDoc(doc(db, 'app_data', 'payment_requests'), { 
-        data: requests, 
-        updated_at: new Date().toISOString() 
-      });
-      console.log("✅ Payment requests synced to Firebase");
+      await deleteDoc(doc(db, COLLECTIONS.MODELS, modelId));
+      console.log(`🗑️ Model ${modelId} deleted`);
     } catch (e: any) {
-      console.error("❌ Failed to save payment requests to Firebase:", e.message);
+      console.error("❌ Failed to delete model:", e.message);
+      throw e;
     }
   },
 
-  // Load Payment Requests from Firestore
-  async loadPaymentRequests(): Promise<PaymentRequest[] | null> {
-    if (!db) return null;
+  // Load all profiles from Firestore Collection
+  async loadProfiles(): Promise<GirlfriendProfile[]> {
+    if (!db) return [];
     try {
-      const docSnap = await getDoc(doc(db, 'app_data', 'payment_requests'));
-      if (docSnap.exists()) {
-        console.log("📥 Loaded payment requests from Firebase");
-        return docSnap.data().data as PaymentRequest[];
-      }
+      const q = query(collection(db, COLLECTIONS.MODELS));
+      const snapshot = await getDocs(q);
+      const profiles: GirlfriendProfile[] = [];
+      snapshot.forEach(doc => {
+        profiles.push(doc.data() as GirlfriendProfile);
+      });
+      console.log(`📥 Loaded ${profiles.length} profiles from Firestore`);
+      return profiles;
     } catch (e: any) {
-      console.warn("ℹ️ No cloud payment requests found in Firebase.", e.message);
+      console.error("❌ Failed to load profiles:", e.message);
+      return [];
     }
-    return null;
   },
 
-  // Save Referral Profiles to Firestore
-  async saveReferrals(referrals: ReferralProfile[]) {
+  // --- PAYMENT REQUESTS ---
+
+  // Create a new payment request
+  async createPaymentRequest(request: PaymentRequest) {
     if (!db) return;
     try {
-      await setDoc(doc(db, 'app_data', 'referrals'), { 
-        data: referrals, 
-        updated_at: new Date().toISOString() 
-      });
-      console.log("✅ Referrals synced to Firebase");
+      // Use setDoc with the specific ID we generated
+      await setDoc(doc(db, COLLECTIONS.PAYMENT_REQUESTS, request.id), request);
+      console.log("✅ Payment request created in Firestore");
     } catch (e: any) {
-      console.error("❌ Failed to save referrals to Firebase:", e.message);
+      console.error("❌ Failed to create payment request:", e.message);
+      throw e;
     }
   },
 
-  // Load Referral Profiles from Firestore
-  async loadReferrals(): Promise<ReferralProfile[] | null> {
-    if (!db) return null;
+  // Load all payment requests
+  async loadPaymentRequests(): Promise<PaymentRequest[]> {
+    if (!db) return [];
     try {
-      const docSnap = await getDoc(doc(db, 'app_data', 'referrals'));
-      if (docSnap.exists()) {
-        console.log("📥 Loaded referrals from Firebase");
-        return docSnap.data().data as ReferralProfile[];
-      }
+      // Order by timestamp desc
+      const q = query(collection(db, COLLECTIONS.PAYMENT_REQUESTS), orderBy("timestamp", "desc"));
+      const snapshot = await getDocs(q);
+      const requests: PaymentRequest[] = [];
+      snapshot.forEach(doc => {
+        requests.push(doc.data() as PaymentRequest);
+      });
+      return requests;
     } catch (e: any) {
-      console.warn("ℹ️ No cloud referrals found in Firebase.", e.message);
+      console.error("❌ Failed to load payment requests:", e.message);
+      return [];
     }
-    return null;
   },
 
-  // Save Referral Transactions to Firestore
-  async saveReferralTransactions(transactions: ReferralTransaction[]) {
+  // Update payment request status
+  async updatePaymentStatus(requestId: string, status: 'approved' | 'rejected') {
     if (!db) return;
     try {
-      await setDoc(doc(db, 'app_data', 'referral_transactions'), { 
-        data: transactions, 
-        updated_at: new Date().toISOString() 
-      });
-      console.log("✅ Referral transactions synced to Firebase");
+      const ref = doc(db, COLLECTIONS.PAYMENT_REQUESTS, requestId);
+      await updateDoc(ref, { status });
+      console.log(`✅ Payment ${requestId} updated to ${status}`);
     } catch (e: any) {
-      console.error("❌ Failed to save referral transactions to Firebase:", e.message);
+      console.error("❌ Failed to update payment status:", e.message);
+      throw e;
     }
   },
 
-  // Load Referral Transactions from Firestore
-  async loadReferralTransactions(): Promise<ReferralTransaction[] | null> {
-    if (!db) return null;
+  // --- REFERRALS (Keeping legacy support or moving to collections if needed) ---
+  // For now, implementing as collections for consistency
+
+  async saveReferral(referral: ReferralProfile) {
+    if (!db) return;
     try {
-      const docSnap = await getDoc(doc(db, 'app_data', 'referral_transactions'));
-      if (docSnap.exists()) {
-        console.log("📥 Loaded referral transactions from Firebase");
-        return docSnap.data().data as ReferralTransaction[];
-      }
-    } catch (e: any) {
-      console.warn("ℹ️ No cloud referral transactions found in Firebase.", e.message);
-    }
-    return null;
+      await setDoc(doc(db, COLLECTIONS.REFERRALS, referral.id), referral);
+    } catch (e) { console.error(e); }
+  },
+
+  async loadReferrals(): Promise<ReferralProfile[]> {
+    if (!db) return [];
+    try {
+      const snapshot = await getDocs(collection(db, COLLECTIONS.REFERRALS));
+      return snapshot.docs.map(doc => doc.data() as ReferralProfile);
+    } catch (e) { return []; }
+  },
+
+  async saveReferralTransaction(tx: ReferralTransaction) {
+    if (!db) return;
+    try {
+      await setDoc(doc(db, COLLECTIONS.REFERRAL_TXS, tx.id), tx);
+    } catch (e) { console.error(e); }
   }
 };
