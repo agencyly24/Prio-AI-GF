@@ -33,7 +33,9 @@ export const ProfileDetail: React.FC<ProfileDetailProps> = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // Check if this model is already in user's unlocked list
-  const isModelUnlocked = (userProfile.unlockedModels || []).includes(profile.id);
+  // Note: VIP users should have access to ALL models automatically
+  const isVIP = userProfile.tier === 'VIP';
+  const isModelUnlocked = isVIP || (userProfile.unlockedModels || []).includes(profile.id);
 
   // Safe access to nested objects
   const appearance = profile.appearance || {
@@ -380,7 +382,7 @@ export const ProfileDetail: React.FC<ProfileDetailProps> = ({
                    <span className="animate-pulse">আনলক হচ্ছে...</span>
                ) : isModelUnlocked ? (
                  <>
-                   আড্ডা শুরু করি
+                   {isVIP ? 'প্রিমিয়াম চ্যাট শুরু করি' : 'আড্ডা শুরু করি'}
                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
                  </>
                ) : (
