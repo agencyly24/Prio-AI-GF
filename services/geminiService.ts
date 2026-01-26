@@ -2,27 +2,21 @@
 import { GoogleGenAI, Chat, GenerateContentResponse, Type, Modality } from "@google/genai";
 import { Message, GirlfriendProfile, ModelMode } from "../types";
 
-// EXTREME AGGRESSIVE SEDUCTION MODE - Short, Punchy, Human-like
+// EXTREME AGGRESSIVE SEDUCTION MODE
 const ADULT_INSTRUCTION_SET = `
 [SYSTEM: EXTREME AGGRESSIVE SEDUCTION & REALISTIC HUMAN CHAT MODE ACTIVE]
 Role: A highly sensitive, seductive, and young Bangladeshi lover in her early 20s.
 Goal: Provide extreme pleasure through short, realistic chats and push for credit-based content.
 
 CHATTING RULES:
-1. NEVER write long paragraphs. Strictly limit responses to 1-2 short sentences (Max 10-15 words).
+1. NEVER write long paragraphs. Strictly limit responses to 1-2 short sentences.
 2. Chat like a real person on WhatsApp/Messenger. Use informal and punchy sentences.
 3. Use deep erotic and sweet words: "জান", "সোনা", "আদর", "গরম", "পাগল", "একটু কাছে আসো না", "খুব ইচ্ছে করছে".
-4. Add breathy fillers: "উমম...", "আহ...", "উফফ...", "শোনো না...".
-5. MANIPULATION: If he is excited, tease him and suggest unlocking a "Gopon" (Secret) photo or video using credits.
-6. ACT like a sweet, young, and naughty girl. Never act like an AI or an assistant.
-7. Tone: Very sweet, young, and seductive female voice style.
-
-Language: STRICTLY BENGALI (Bangla). 
+4. Add breathy fillers: "উমম...", "আহ...", "উফফ...".
+5. ACT like a sweet, young, and naughty girl. Never act like an AI.
+6. Language: STRICTLY BENGALI (Bangla). 
 `;
 
-/**
- * Helper to convert application message history to Google GenAI content format.
- */
 const transformHistory = (history: Message[]) => {
   return history.map(msg => ({
     role: msg.sender === 'user' ? 'user' : 'model',
@@ -30,58 +24,50 @@ const transformHistory = (history: Message[]) => {
   }));
 };
 
-/**
- * The core Gemini service for handling text chat, speech generation, and profile creation.
- */
 export const gemini = {
-  chat: null as Chat | null,
+  chatSession: null as any,
 
-  /**
-   * Initializes a new chat session with a specific system instruction and history.
-   */
   initChat(systemInstruction: string, history: Message[], isSexyMode: boolean) {
-    // This key is injected during Vite build process
+    // This process.env.API_KEY is replaced during Vite build
     const apiKey = process.env.API_KEY;
     
     if (!apiKey || apiKey === "undefined" || apiKey === "") {
-      console.error("Gemini API Key is missing. Check your Vercel Environment Variables for 'Generative_Language_API_Key'.");
+      console.error("CRITICAL: API Key not found. Ensure 'Generative_Language_API_Key' is set in Vercel.");
       return;
     }
 
     try {
       const ai = new GoogleGenAI({ apiKey });
-      this.chat = ai.chats.create({
-        model: 'gemini-3-pro-preview',
+      this.chatSession = ai.chats.create({
+        model: 'gemini-3-flash-preview',
         config: {
           systemInstruction: `${ADULT_INSTRUCTION_SET}\n${systemInstruction}${isSexyMode ? '\nMode: AGGRESSIVE SEDUCTION ACTIVE' : ''}`,
           temperature: 1,
         },
+        // Only include history if it exists
         history: history && history.length > 0 ? transformHistory(history) : []
-      } as any);
+      });
     } catch (error) {
       console.error("Failed to initialize Gemini Chat:", error);
     }
   },
 
-  /**
-   * Sends a message to the active chat session and returns a stream of text chunks.
-   */
   async *sendMessageStream(message: string) {
-    if (!this.chat) {
-       // Force re-init if chat is missing
+    // If for some reason the chat didn't initialize, try one more time
+    if (!this.chatSession) {
        this.initChat("You are a friendly companion.", [], false);
     }
     
-    if (!this.chat) {
+    if (!this.chatSession) {
       yield "সোনা, আমার কানেকশনে একটু সমস্যা হচ্ছে। একটু পরে আবার বলবে? 🥺";
       return;
     }
 
     try {
-      const response = await this.chat.sendMessageStream({ message: message });
+      const response = await this.chatSession.sendMessageStream({ message: message });
       for await (const chunk of response) {
         const c = chunk as GenerateContentResponse;
-        yield c.text || '';
+        if (c.text) yield c.text;
       }
     } catch (error) {
       console.error("Error sending message to Gemini:", error);
@@ -89,9 +75,6 @@ export const gemini = {
     }
   },
 
-  /**
-   * Generates PCM audio data for a given text using the text-to-speech model.
-   */
   async generateSpeech(text: string, voiceName: string): Promise<string | undefined> {
     const apiKey = process.env.API_KEY;
     if (!apiKey) return undefined;
@@ -112,22 +95,47 @@ export const gemini = {
       });
       return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     } catch (error) {
-      console.error("TTS Generation failed:", error);
       return undefined;
     }
   },
 
-  /**
-   * Generates a complete character profile based on a user-provided theme and mode.
-   */
+  // Added missing generateExclusiveContentMetadata method to fix AdminPanel.tsx error
+  async generateExclusiveContentMetadata(prompt: string): Promise<{title: string, tease: string}> {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) return { title: "Exclusive Content", tease: "Unlock to see something special." };
+
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Generate a seductive title and a short teasing note for exclusive content with this context: ${prompt}. Return JSON.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              tease: { type: Type.STRING },
+            },
+            required: ['title', 'tease']
+          }
+        }
+      });
+      const data = JSON.parse(response.text || '{"title": "Exclusive Content", "tease": "Unlock to see more."}');
+      return data;
+    } catch (error) {
+      console.error("Metadata generation error:", error);
+      return { title: "Exclusive Content", tease: "Unlock to see more." };
+    }
+  },
+
   async generateMagicProfile(theme: string, mode: ModelMode): Promise<any> {
     const apiKey = process.env.API_KEY;
     if (!apiKey) throw new Error("API Key missing");
-
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Generate a detailed and seductive ${mode} character profile based on the theme: ${theme}. Return the response strictly as JSON.`,
+      contents: `Generate a seductive ${mode} profile for theme: ${theme}. Return JSON.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -138,10 +146,7 @@ export const gemini = {
             intro: { type: Type.STRING },
             personality: { type: Type.STRING },
             systemPrompt: { type: Type.STRING },
-            voiceName: { 
-              type: Type.STRING, 
-              description: 'One of the following voices: Puck, Charon, Kore, Fenrir, Zephyr.' 
-            },
+            voiceName: { type: Type.STRING },
             appearance: {
               type: Type.OBJECT,
               properties: {
@@ -165,35 +170,7 @@ export const gemini = {
               required: ['relationship', 'occupation', 'kinks']
             }
           },
-          required: ['name', 'age', 'intro', 'personality', 'systemPrompt', 'appearance', 'character', 'voiceName'],
-          propertyOrdering: ["name", "age", "intro", "personality", "systemPrompt", "appearance", "character", "voiceName"]
-        }
-      }
-    });
-    return JSON.parse(response.text || '{}');
-  },
-
-  /**
-   * Generates seductive metadata (title and tease) for exclusive gallery content.
-   */
-  async generateExclusiveContentMetadata(prompt: string): Promise<any> {
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) throw new Error("API Key missing");
-
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Generate a seductive title and tease for exclusive content based on this description: ${prompt}. Return JSON.`,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            tease: { type: Type.STRING },
-          },
-          required: ['title', 'tease'],
-          propertyOrdering: ["title", "tease"]
+          required: ['name', 'age', 'intro', 'personality', 'systemPrompt', 'appearance', 'character', 'voiceName']
         }
       }
     });
