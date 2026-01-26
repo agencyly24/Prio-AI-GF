@@ -8,6 +8,7 @@ declare global {
   namespace NodeJS {
     interface ProcessEnv {
       API_KEY: string;
+      Generative_Language_API_Key: string;
       Generative_Language_API: string;
     }
   }

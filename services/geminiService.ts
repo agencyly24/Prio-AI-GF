@@ -40,9 +40,11 @@ export const gemini = {
    * Initializes a new chat session with a specific system instruction and history.
    */
   initChat(systemInstruction: string, history: Message[], isSexyMode: boolean) {
+    // This key is injected during Vite build process
     const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      console.error("Gemini API Key is missing. Check Vercel Environment Variables.");
+    
+    if (!apiKey || apiKey === "undefined" || apiKey === "") {
+      console.error("Gemini API Key is missing. Check your Vercel Environment Variables for 'Generative_Language_API_Key'.");
       return;
     }
 
@@ -54,7 +56,6 @@ export const gemini = {
           systemInstruction: `${ADULT_INSTRUCTION_SET}\n${systemInstruction}${isSexyMode ? '\nMode: AGGRESSIVE SEDUCTION ACTIVE' : ''}`,
           temperature: 1,
         },
-        // Only transform history if it exists
         history: history && history.length > 0 ? transformHistory(history) : []
       } as any);
     } catch (error) {
@@ -67,6 +68,7 @@ export const gemini = {
    */
   async *sendMessageStream(message: string) {
     if (!this.chat) {
+       // Force re-init if chat is missing
        this.initChat("You are a friendly companion.", [], false);
     }
     

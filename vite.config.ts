@@ -6,23 +6,21 @@ export default defineConfig(({ mode }) => {
   // Load env file based on `mode` in the current working directory.
   const env = loadEnv(mode, (process as any).cwd(), '');
 
-  // Support multiple variations of the API key name, including the one set in Vercel.
-  // We prioritize the names you provided to ensure no crash after environment change.
+  // Support the specific name provided by the user: 'Generative_Language_API_Key'
+  // We prioritize this exact name to ensure Vercel integration works perfectly.
   const apiKey = 
     env.Generative_Language_API_Key || 
     env.Generative_Language_API || 
-    env.API_KEY || 
-    env.GOOGLE_API_KEY || 
     process.env.Generative_Language_API_Key || 
     process.env.Generative_Language_API || 
+    env.API_KEY || 
     process.env.API_KEY || 
-    process.env.GOOGLE_API_KEY || 
     '';
 
   return {
     plugins: [react()],
     define: {
-      // This ensures process.env.API_KEY is replaced with the actual string during build
+      // This maps the found API key to process.env.API_KEY inside the app code
       'process.env.API_KEY': JSON.stringify(apiKey),
     },
     server: {
