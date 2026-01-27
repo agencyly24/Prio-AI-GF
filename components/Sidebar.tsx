@@ -1,12 +1,14 @@
 
 import React, { useState } from 'react';
-import { View, UserProfile } from '../types';
+// Fixed: View is not exported from types, using ViewState instead
+import { ViewState, UserProfile } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
-  currentView: View;
-  setView: (view: View) => void;
+  // Fixed: View replaced with ViewState
+  currentView: ViewState;
+  setView: (view: ViewState) => void;
   userProfile: UserProfile;
   setUserProfile: (profile: UserProfile) => void;
   voiceEnabled: boolean;

@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { Layout3D, Card3D, Button3D } from './components/Layout3D';
 import { PurchasePopup } from './components/PurchasePopup';
-import { UserProfile, ViewState, Model, Purchase, PaymentRequest } from './types';
+// Fixed: Model is not exported from types, using GirlfriendProfile instead
+import { UserProfile, ViewState, GirlfriendProfile, Purchase, PaymentRequest } from './types';
 import { cloudStore } from './services/cloudStore';
 import { auth } from './services/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -62,7 +63,8 @@ const Dashboard = ({ models, unlockedModels, setView, onSelectModel, userCredits
           </div>
        ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 relative z-10 pb-20">
-              {models.filter((m: any) => m.active !== false).map((model: Model, idx: number) => {
+              {/* Fixed: Model type replaced with GirlfriendProfile */}
+              {models.filter((m: any) => m.active !== false).map((model: GirlfriendProfile, idx: number) => {
                 const safeUnlocked = unlockedModels || [];
                 const isVIP = packageId === 'package3';
                 const isUnlocked = isVIP || safeUnlocked.includes(model.id); 
@@ -81,7 +83,7 @@ const Dashboard = ({ models, unlockedModels, setView, onSelectModel, userCredits
                     <div className="relative w-full aspect-[9/16] rounded-[2.5rem] p-[3px] bg-white border border-white/60 transform transition-all duration-300 hover:scale-[1.02] hover:-translate-y-2 shadow-2xl">
                         <div className="w-full h-full bg-slate-50 rounded-[2.3rem] flex flex-col relative overflow-hidden">
                             <div className="h-[70%] w-full relative p-1">
-                                <img src={model.image || model.avatarImage} className="w-full h-full object-cover rounded-[2rem]" alt={model.name} />
+                                <img src={model.image} className="w-full h-full object-cover rounded-[2rem]" alt={model.name} />
                                 <div className={`absolute top-4 right-4 ${isSexy ? 'bg-red-600' : 'bg-green-500'} px-3 py-1 rounded-full text-[10px] font-black text-white uppercase`}>
                                     {model.mode || 'Girlfriend'}
                                 </div>
@@ -107,10 +109,11 @@ const Dashboard = ({ models, unlockedModels, setView, onSelectModel, userCredits
 };
 
 const App: React.FC = () => {
+  // Fixed: Model type replaced with GirlfriendProfile
   const [user, setUser] = useState<UserProfile | null>(null);
   const [view, setView] = useState<ViewState>('landing');
-  const [models, setModels] = useState<Model[]>([]);
-  const [selectedModel, setSelectedModel] = useState<Model | null>(null);
+  const [models, setModels] = useState<GirlfriendProfile[]>([]);
+  const [selectedModel, setSelectedModel] = useState<GirlfriendProfile | null>(null);
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [paymentRequests, setPaymentRequests] = useState<PaymentRequest[]>([]);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
@@ -173,7 +176,8 @@ const App: React.FC = () => {
     }
   };
 
-  const handleModelSelect = (m: Model) => {
+  // Fixed: Model type replaced with GirlfriendProfile
+  const handleModelSelect = (m: GirlfriendProfile) => {
     setSelectedModel(m);
     setView('model-view');
   };

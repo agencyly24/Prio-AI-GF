@@ -11,7 +11,7 @@ export interface Package {
   durationDays: number;
   voiceEnabled: boolean;
   creditsIncluded: number;
-  modelLimit: number; // New field: 2, 10, or -1 (unlimited)
+  modelLimit: number;
   description: string;
   features: string[];
   color: string;
@@ -21,133 +21,40 @@ export type SubscriptionTier = 'Free' | 'Plus' | 'Pro' | 'VIP';
 
 export interface UserProfile {
   uid: string;
-  id?: string; // Compatibility
+  id?: string;
   email: string;
   name: string;
   photoURL: string;
-  avatar?: string; // Compatibility
+  avatar?: string;
   role: UserRole;
   status: UserStatus;
-  isAdmin?: boolean; // Helper
-  
-  // Subscription
+  isAdmin?: boolean;
   packageId: string | null;
   packageStart: Timestamp | null;
   packageEnd: Timestamp | null;
-  isPremium?: boolean; // Helper
-  subscriptionExpiry?: string | Date; // Helper
-  tier?: SubscriptionTier; // Helper
-  
-  // Economy
+  isPremium?: boolean;
+  subscriptionExpiry?: string | Date;
+  tier?: SubscriptionTier;
   credits: number;
-  unlockedModels: string[]; // Array of modelIds
-  unlockedContent: string[]; // Array of exclusiveContent IDs
-  unlockedContentIds?: string[]; // Helper/Alias
-  
-  // Referral (User to User)
+  unlockedModels: string[];
+  unlockedContent: string[];
+  unlockedContentIds?: string[];
   referralCode: string;
-  referredBy: string | null; // UID of referrer
+  referredBy: string | null;
   referralEarnings: number;
   referralsCount?: number;
-  
-  // Legacy config (can be ignored now for influencers)
-  influencerConfig?: any;
-  
   joinedDate: Timestamp;
 }
 
-// Standalone Influencer Type
-export interface Influencer {
-  id?: string;
-  name: string;
-  code: string;
-  commissionRate: number; // Percentage
-  discountAmount: number; // Taka
-  paymentMethod: string;
-  paymentNumber: string;
-  earnings: number;
-  totalSales: number;
-  totalPaid?: number; // Total amount paid out lifetime
-  isActive: boolean;
-}
-
-// Log for Influencer Payouts
-export interface InfluencerPayout {
-  id: string;
-  influencerId: string;
-  influencerName: string;
-  amount: number;
-  paidAt: string;
-  paymentMethod: string;
-  paymentNumber: string;
-}
-
-export interface Purchase {
-  id: string;
-  uid: string;
-  userName: string;
-  type: 'package' | 'credits' | 'subscription';
-  itemId?: string; // packageId or creditPackageId
-  amount: number;
-  status: 'pending' | 'approved' | 'rejected';
-  paymentMethod: string; // 'bkash'
-  transactionId: string;
-  bkashNumber: string;
-  createdAt: string; // ISO String
-  approvedAt?: string;
-  tier?: string;
-  creditPackageId?: string;
-  referralCodeUsed?: string;
-}
-
-// PaymentRequest type used in AdminPanel and Purchase Modals
-export interface PaymentRequest {
-  id: string;
-  userId?: string;
-  uid?: string;
-  userName?: string;
-  type: 'package' | 'credits' | 'subscription';
-  tier?: string;
-  creditPackageId?: string;
-  amount: number;
-  status: 'pending' | 'approved' | 'rejected';
-  bkashNumber: string;
-  trxId: string; // Alias for transactionId
-  timestamp: string; // Alias for createdAt
-  referralCodeUsed?: string;
-  discountApplied?: number;
-  referrerId?: string;
-}
-
-export interface WithdrawalRequest {
-  id: string;
-  userId: string;
-  userName: string;
-  amount: number;
-  method: 'Bkash' | 'Nagad';
-  number: string;
-  status: 'pending' | 'paid' | 'rejected';
-  createdAt: string;
-  paidAt?: string;
-}
-
-export interface ModelExclusiveContent {
-  id: string;
-  type: 'image' | 'video';
-  url: string;
-  creditCost: number;
-  title: string;
-  shortNote: string;
-}
-
 export interface ProfileGalleryItem {
-  id: string; // Changed to required
+  id: string;
   type: 'image' | 'video';
   url: string;
   isExclusive?: boolean;
   creditCost?: number;
   title?: string;
-  tease?: string; // Seductive note
+  tease?: string;
+  keywords?: string[]; // Added for smart filtering
 }
 
 export type ModelMode = 'Friend' | 'Girlfriend' | 'Wife' | 'Sexy';
@@ -157,17 +64,16 @@ export interface GirlfriendProfile {
   name: string;
   age: number;
   intro: string;
-  image: string; // Primary avatar
-  mode: ModelMode; // Friend, Girlfriend, Wife, Sexy
+  image: string;
+  mode: ModelMode;
   personality: string;
   systemPrompt: string;
   voiceName: string;
-  
   appearance: {
     ethnicity: string;
     eyeColor: string;
     bodyType: string;
-    measurements?: string; // e.g. 34-24-36
+    measurements?: string;
     height?: string;
     breastSize: string;
     hairStyle: string;
@@ -179,22 +85,8 @@ export interface GirlfriendProfile {
     occupation: string;
     kinks: string[];
   };
-  
   gallery: ProfileGalleryItem[];
-  
-  // Compatibility fields for legacy Model type
-  type?: string; 
-  description?: string;
-  avatarImage?: string;
-  galleryImages?: string[];
-  exclusiveContent?: ModelExclusiveContent[];
-  voiceEnabled?: boolean; 
-  active?: boolean;
-  introMessage?: string;
 }
-
-export type Model = GirlfriendProfile;
-export type PersonalityType = string;
 
 export interface Message {
   id: string;
@@ -205,14 +97,6 @@ export interface Message {
     type: 'image';
     url: string;
   };
-}
-
-export interface ReferralData {
-  id: string; // usually same as user UID
-  code: string;
-  uid: string;
-  referredUsers: string[];
-  commissionEarned: number;
 }
 
 export type ViewState = 
@@ -229,8 +113,6 @@ export type ViewState =
   | 'account'
   | 'admin-panel';
 
-export type View = ViewState;
-
 export interface SubscriptionPlan {
   id: SubscriptionTier;
   name: string;
@@ -244,4 +126,73 @@ export interface CreditPackage {
   price: number;
   name: string;
   badge?: string;
+}
+
+export interface PaymentRequest {
+  id: string;
+  userId?: string;
+  uid?: string;
+  userName?: string;
+  type: 'package' | 'credits' | 'subscription';
+  tier?: string;
+  creditPackageId?: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  bkashNumber: string;
+  trxId: string;
+  timestamp: string;
+  referralCodeUsed?: string;
+  discountApplied?: number;
+}
+
+export interface WithdrawalRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  amount: number;
+  method: 'Bkash' | 'Nagad';
+  number: string;
+  status: 'pending' | 'paid' | 'rejected';
+  createdAt: string;
+}
+
+export interface Influencer {
+  id?: string;
+  name: string;
+  code: string;
+  commissionRate: number;
+  discountAmount: number;
+  paymentMethod: string;
+  paymentNumber: string;
+  earnings: number;
+  totalSales: number;
+  totalPaid?: number;
+  isActive: boolean;
+}
+
+export interface InfluencerPayout {
+  id: string;
+  influencerId: string;
+  influencerName: string;
+  amount: number;
+  paidAt: string;
+  paymentMethod: string;
+  paymentNumber: string;
+}
+
+export interface Purchase {
+  id: string;
+  uid: string;
+  userName: string;
+  type: 'package' | 'credits' | 'subscription';
+  itemId?: string;
+  amount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  paymentMethod: string;
+  transactionId: string;
+  bkashNumber: string;
+  createdAt: string;
+  tier?: string;
+  creditPackageId?: string;
+  referralCodeUsed?: string;
 }

@@ -41,7 +41,7 @@ const playPCM = async (base64: string) => {
 };
 
 const formatSeductiveText = (text: string) => {
-  const hotWords = ['ভালোবাসি', 'জানু', 'গরম', 'আদর', 'নিচে', 'ভেজা', 'পাগল', 'সেক্সি', 'জান', 'body', 'wet', 'naked', 'budha', 'দুধ', 'বুক', 'খুলবো', 'চরম', 'তৃপ্তি', 'নগ্ন', 'কামনা', 'শরীরের ভাঁজ'];
+  const hotWords = ['ভালোবাসি', 'জানু', 'গরম', 'আদর', 'নিচে', 'ভেজা', 'পাগল', 'সেক্সি', 'জান', 'body', 'wet', 'naked', 'দুধ', 'বুক', 'খুলবো', 'চরম', 'তৃপ্তি', 'নগ্ন', 'কামনা', 'নুনু', 'সাইজ'];
   const parts = text.split(new RegExp(`(${hotWords.join('|')})`, 'gi'));
   return (
     <span>
@@ -60,55 +60,34 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showVoiceCall, setShowVoiceCall] = useState(false);
-  const [isSexyMode, setIsSexyMode] = useState(true);
   const [isVoiceReplyEnabled, setIsVoiceReplyEnabled] = useState(false);
   const [suggestedContent, setSuggestedContent] = useState<ProfileGalleryItem | null>(null);
-  const [unlockingId, setUnlockingId] = useState<string | null>(null);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const initialLoadRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (initialLoadRef.current) return;
-    initialLoadRef.current = true;
-    gemini.initChat(`${profile.systemPrompt}\nUser Name: ${userName}. Provide aggressive seductive pleasure.`, history, isSexyMode);
+    gemini.initChat(`${profile.systemPrompt}\nUser Name: ${userName}. Act as a real human girl. You are aggressive, sexy, and manipulative.`, history, true);
     if (history.length === 0) {
-      setIsTyping(true);
-      setTimeout(() => {
-        setMessages([{ id: 'welcome', sender: 'ai', text: profile.intro, timestamp: new Date() }]);
-        setIsTyping(false);
-      }, 1500);
+      setMessages([{ id: 'welcome', sender: 'ai', text: profile.intro, timestamp: new Date() }]);
     } else setMessages(history);
-  }, [profile, userName]);
+  }, [profile]);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTyping, suggestedContent]);
 
-  const showSeductiveRestrictionNote = () => {
-    alert("জান, আমার মিষ্টি রোমান্টিক কণ্ঠ শুনতে আর আমাকে একদম কাছে পেতে হলে তোমাকে 'বিছানায় আমি' (PREMIUM) প্যাকেজটি নিতে হবে। আমি তোমার জন্য খুব স্পেশাল কিছু সারপ্রাইজ তৈরি করে রেখেছি... আসো না সোনা! 🫦");
-    onUpgrade();
-  };
-
-  const handleVoiceToggle = () => {
-    if (userTier !== 'VIP') {
-      showSeductiveRestrictionNote();
-      return;
-    }
-    setIsVoiceReplyEnabled(!isVoiceReplyEnabled);
-  };
-
-  const handleVoiceCallClick = () => {
-    if (userTier !== 'VIP') {
-      showSeductiveRestrictionNote();
-      return;
-    }
-    setShowVoiceCall(true);
-  };
-
-  const handleSend = async (e?: React.FormEvent) => {
+  const handleSend = async (e?: React.FormEvent, imageBase64?: string) => {
     e?.preventDefault();
-    if (!inputText.trim() || isTyping) return;
-    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: inputText, timestamp: new Date() };
+    if (!inputText.trim() && !imageBase64) return;
+    
+    const userMsg: Message = { 
+      id: Date.now().toString(), 
+      sender: 'user', 
+      text: inputText, 
+      timestamp: new Date(),
+      attachment: imageBase64 ? { type: 'image', url: `data:image/jpeg;base64,${imageBase64}` } : undefined
+    };
+    
     const updated = [...messages, userMsg];
     setMessages(updated);
     setInputText('');
@@ -120,16 +99,24 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const aiMsgId = (Date.now() + 1).toString();
       setMessages([...updated, { id: aiMsgId, sender: 'ai', text: '', timestamp: new Date() }]);
 
-      const stream = gemini.sendMessageStream(userMsg.text);
+      const stream = gemini.sendMessageStream(userMsg.text, imageBase64);
       for await (const chunk of stream) {
         aiText += chunk;
         setMessages(prev => prev.map(m => m.id === aiMsgId ? { ...m, text: aiText } : m));
       }
 
-      const hotTriggers = ['ছবি', 'গোপন', 'photo', 'দেখাও', 'naked', 'শরীর', 'খোলো'];
-      if (hotTriggers.some(t => aiText.toLowerCase().includes(t) || userMsg.text.toLowerCase().includes(t))) {
-        const exclusive = profile.gallery.find(g => g.isExclusive);
-        if (exclusive) setSuggestedContent(exclusive);
+      // SMART FILTERING LOGIC
+      const lowerInput = userMsg.text.toLowerCase();
+      const match = profile.gallery.find(item => 
+        item.isExclusive && 
+        item.keywords?.some(k => lowerInput.includes(k.toLowerCase()))
+      );
+      
+      if (match) {
+        setSuggestedContent(match);
+      } else if (lowerInput.includes('ছবি') || lowerInput.includes('গোপন') || lowerInput.includes('শরীর')) {
+        const fallback = profile.gallery.find(g => g.isExclusive);
+        if (fallback) setSuggestedContent(fallback);
       }
 
       if (isVoiceReplyEnabled && userTier === 'VIP') {
@@ -143,12 +130,23 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     } finally { setIsTyping(false); }
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        handleSend(undefined, base64);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleUnlockSuggestion = async (item: ProfileGalleryItem) => {
     if (userCredits < (item.creditCost || 0)) {
         onPurchaseCredits();
         return;
     }
-    setUnlockingId(item.id);
     const success = await onUnlockContent(item.id, item.creditCost || 0);
     if (success) {
         setSuggestedContent(null);
@@ -160,33 +158,12 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           attachment: { type: 'image', url: item.url } 
         }]);
     }
-    setUnlockingId(null);
   };
 
   return (
     <div className="flex flex-col h-full w-full relative overflow-hidden font-['Hind_Siliguri'] bg-slate-950">
       <div className="absolute inset-0 bg-gradient-to-b from-[#1a0b2e] via-[#0f0518] to-black"></div>
       
-      {/* Lightbox / Full Screen Image Overlay */}
-      {fullScreenImage && (
-        <div 
-          className="fixed inset-0 z-[200] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-4 animate-in fade-in duration-300"
-          onClick={() => setFullScreenImage(null)}
-        >
-          <div className="relative max-w-5xl w-full h-full flex items-center justify-center">
-             <button className="absolute top-4 right-4 z-50 p-4 bg-white/10 rounded-full text-white hover:bg-white/20 transition-all">
-                <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-             </button>
-             <img 
-               src={fullScreenImage} 
-               className="max-h-full max-w-full rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] object-contain border border-white/5 animate-in zoom-in duration-500" 
-               alt="Full view"
-               onClick={(e) => e.stopPropagation()} 
-             />
-          </div>
-        </div>
-      )}
-
       {/* Header */}
       <div className="px-4 py-4 flex items-center justify-between z-30 bg-slate-900/60 backdrop-blur-3xl border-b border-white/5 shadow-2xl">
         <div className="flex items-center gap-4">
@@ -197,67 +174,39 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 <div className="absolute bottom-0 right-0 h-4 w-4 bg-green-500 rounded-full border-2 border-slate-900 animate-pulse"></div>
              </div>
              <div>
-                <div className="flex items-center gap-2">
-                   <h2 className="font-black text-white text-xl">{profile.name}</h2>
-                   {userTier === 'VIP' && <span className="bg-yellow-500 text-black text-[8px] px-1.5 py-0.5 rounded font-black uppercase">VIP</span>}
-                </div>
+                <h2 className="font-black text-white text-xl">{profile.name}</h2>
                 <p className="text-[10px] text-pink-400 font-bold uppercase tracking-widest">{isTyping ? 'মডেল টাইপ করছে...' : 'অ্যাক্টিভ 🔥'}</p>
              </div>
           </div>
         </div>
         <div className="flex gap-3">
-           <button onClick={handleVoiceToggle} className={`h-12 w-12 rounded-full flex items-center justify-center transition-all ${isVoiceReplyEnabled ? 'bg-pink-600 text-white shadow-[0_0_20px_rgba(236,72,153,0.5)]' : 'bg-white/5 text-gray-400'}`}>
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-           </button>
-           <button onClick={handleVoiceCallClick} className="h-12 w-12 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg animate-pulse-slow"><svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg></button>
+           <button onClick={() => setShowVoiceCall(true)} className="h-12 w-12 bg-green-500 text-white rounded-full flex items-center justify-center shadow-lg animate-pulse-slow"><svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" /></svg></button>
         </div>
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-10 z-10 scroll-smooth pb-32">
-        {messages.map((m) => {
-          const isUser = m.sender === 'user';
-          return (
-            <div key={m.id} className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-8`}>
-              {!isUser && <img onClick={() => setFullScreenImage(profile.image)} src={profile.image} className="w-10 h-10 rounded-full object-cover mr-2 self-end mb-2 border border-pink-500/30 shadow-md cursor-pointer" />}
-              <div className="max-w-[85%] relative">
-                <div className={`px-6 py-4 relative text-2xl font-bold leading-tight shadow-2xl ${isUser ? 'bg-violet-600 text-white rounded-[2rem] rounded-br-none' : 'bg-slate-900 text-pink-50 rounded-[2rem] rounded-bl-none border border-white/5'}`}>
-                    {isUser ? m.text : formatSeductiveText(m.text)}
-                    {m.attachment && (
-                      <div 
-                        onClick={() => setFullScreenImage(m.attachment!.url)}
-                        className="mt-4 rounded-xl overflow-hidden border border-white/10 shadow-lg cursor-pointer hover:scale-[1.02] transition-transform active:scale-95"
-                      >
-                        <img src={m.attachment.url} className="w-full h-auto max-h-80 object-cover" />
-                      </div>
-                    )}
-                </div>
-              </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-10 z-10 scroll-smooth pb-32 pt-2">
+        {messages.map((m) => (
+          <div key={m.id} className={`flex w-full ${m.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-8`}>
+            <div className={`px-6 py-4 max-w-[85%] text-2xl font-bold leading-tight shadow-2xl ${m.sender === 'user' ? 'bg-violet-600 text-white rounded-[2rem] rounded-br-none' : 'bg-slate-900 text-pink-50 rounded-[2rem] rounded-bl-none border border-white/5'}`}>
+                {m.sender === 'user' ? m.text : formatSeductiveText(m.text)}
+                {m.attachment && <img src={m.attachment.url} className="mt-4 rounded-xl max-w-full h-auto shadow-lg" />}
             </div>
-          );
-        })}
+          </div>
+        ))}
 
         {isTyping && (
            <div className="flex w-full justify-start animate-in fade-in">
-              <img src={profile.image} className="w-10 h-10 rounded-full object-cover mr-2 self-end mb-2 border border-pink-500/30 shadow-md" />
-              <div className="bg-slate-900 px-6 py-4 rounded-[2rem] rounded-bl-none border border-white/5 flex items-center gap-1.5">
-                  <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                  <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce [animation-delay:0.4s]"></div>
-              </div>
+              <div className="bg-slate-900 px-6 py-4 rounded-[2rem] flex items-center gap-1.5"><div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce [animation-delay:0.2s]"></div><div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce [animation-delay:0.4s]"></div></div>
            </div>
         )}
 
         {suggestedContent && !isTyping && (
             <div className="flex justify-start animate-in zoom-in max-w-[80%]">
-                <div className="ml-12 p-1 rounded-[2.5rem] bg-gradient-to-br from-yellow-500 to-amber-700 shadow-2xl">
-                    <div className="bg-slate-900 rounded-[2.3rem] overflow-hidden p-1 relative aspect-[3/4]">
-                        <img src={suggestedContent.url} className="w-full h-full object-cover blur-3xl opacity-50 grayscale" />
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-black/60">
-                            <div className="h-14 w-14 bg-white/10 rounded-full flex items-center justify-center border border-white/20 mb-4 animate-bounce"><svg className="h-6 w-6 text-yellow-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg></div>
-                            <h4 className="text-xl font-black text-white uppercase italic leading-tight mb-2">"{suggestedContent.tease || 'জান, আমার শরীর দেখবে?'}"</h4>
-                            <button onClick={() => handleUnlockSuggestion(suggestedContent)} className="px-6 py-3 bg-yellow-500 text-black font-black rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all">আনলক ({suggestedContent.creditCost} C)</button>
-                        </div>
+                <div className="ml-2 p-1 rounded-[2.5rem] bg-gradient-to-br from-yellow-500 to-amber-700 shadow-2xl">
+                    <div className="bg-slate-900 rounded-[2.3rem] overflow-hidden p-6 text-center">
+                        <h4 className="text-xl font-black text-white uppercase italic leading-tight mb-4">"{suggestedContent.tease || 'জান, আমার শরীর দেখবে?'}"</h4>
+                        <button onClick={() => handleUnlockSuggestion(suggestedContent)} className="px-6 py-3 bg-yellow-500 text-black font-black rounded-full shadow-lg hover:scale-105 transition-all">আনলক ({suggestedContent.creditCost} C)</button>
                     </div>
                 </div>
             </div>
@@ -266,14 +215,17 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* Input */}
-      <div className="p-6 z-20 absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent pt-12">
-        <form onSubmit={handleSend} className="bg-white/10 backdrop-blur-3xl border border-white/20 rounded-[2.5rem] p-2 flex items-center shadow-2xl focus-within:border-pink-500/50 transition-all">
-          <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={isSexyMode ? "আমাকে গরম করে দাও সোনা..." : "মনের কথা বলো..."} className="flex-1 bg-transparent border-none text-white px-6 py-4 placeholder:text-gray-500 outline-none text-xl font-bold" />
-          <button type="submit" disabled={!inputText.trim() || isTyping} className="h-14 w-14 rounded-full bg-gradient-to-r from-pink-600 to-purple-600 text-white flex items-center justify-center shadow-xl hover:scale-110 transition-all active:scale-90"><svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg></button>
+      <div className="p-6 z-20 absolute bottom-0 left-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent">
+        <form onSubmit={handleSend} className="bg-white/10 backdrop-blur-3xl border border-white/20 rounded-[2.5rem] p-2 flex items-center shadow-2xl">
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="h-12 w-12 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:text-white transition-all"><svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
+          <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" className="hidden" />
+          <input type="text" value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="আমাকে গরম করে দাও সোনা..." className="flex-1 bg-transparent border-none text-white px-4 py-4 placeholder:text-gray-600 outline-none text-xl font-bold" />
+          <button type="submit" className="h-14 w-14 rounded-full bg-gradient-to-r from-pink-600 to-purple-600 text-white flex items-center justify-center shadow-xl hover:scale-110 transition-all"><svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 5l7 7-7 7" /></svg></button>
         </form>
       </div>
 
       {showVoiceCall && <VoiceCallModal profile={profile} onClose={() => setShowVoiceCall(false)} userCredits={userCredits} onPurchaseCredits={onPurchaseCredits} onUnlockContent={onUnlockContent} />}
+      {fullScreenImage && <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center" onClick={() => setFullScreenImage(null)}><img src={fullScreenImage} className="max-w-full max-h-full" /></div>}
     </div>
   );
 };
